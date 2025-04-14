@@ -5,18 +5,18 @@ from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 from typing import List, Optional
+from src.utils.nltk_setup_data import setup_nltk_data
 
 class TextPreprocessor:
     def __init__(self, language: str = 'english'):
         """Initialize with language settings"""
-        # Download required NLTK data
-        nltk.download('punkt')
-        nltk.download('stopwords')
-        nltk.download('wordnet')
+        # Setup NLTK data with SSL fix
+        setup_nltk_data()
         
         self.language = language
         self.lemmatizer = WordNetLemmatizer()
         self.stop_words = set(stopwords.words(language))
+        
         
     def preprocess(self, text: str) -> str:
         """Full preprocessing pipeline"""
