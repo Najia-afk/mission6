@@ -1,7 +1,9 @@
 import json
 import pandas as pd
+import plotly.graph_objects as go
 from collections import Counter
 from typing import Dict, List, Union
+import plotly.express as px
 
 class SpecificationsValueAnalyzer:
     """Analyze product specifications to extract key-value pairs and their frequencies"""
@@ -65,3 +67,45 @@ class SpecificationsValueAnalyzer:
                         .tolist())
         
         return result_df[result_df['key'].isin(top_keys_list)]
+    
+    def create_radial_icicle_chart(self, top_keys: int = 10, top_values: int = 5) -> go.Figure:
+        """
+        Create a radial icicle (sunburst) chart of the most common specification keys and values
+        using plotly express.
+        """
+
+        # Get the data
+        data_df = self.get_top_values(top_keys=top_keys, top_values=top_values)
+        
+        # Create a dataframe for plotly express with the right structure
+        # We need to transform our data into a format suitable for px.sunburst
+        sunburst_data = []
+        
+        for _, row in data_df.iterrows():
+            sunburst_data.append({
+                'level1': 'Specifications',
+                'level2': row['key'],
+                'level3': row['value'],
+                'count': row['count']
+            })
+        
+        sunburst_df = pd.DataFrame(sunburst_data)
+        
+        # Create the sunburst chart with plotly express
+        fig = px.sunburst(
+            sunburst_df,
+            path=['level1', 'level2', 'level3'],  # Define the hierarchy
+            values='count',                        # Size of segments
+            title="Product Specifications Hierarchy",
+            branchvalues='total',                 # Use 'total' for better circle proportion
+            width=900,
+            height=900
+        )
+        
+        # Update layout for better appearance
+        fig.update_layout(
+            margin=dict(t=50, l=0, r=0, b=0),
+            uniformtext=dict(minsize=10, mode='hide')
+        )
+        
+        return fig
