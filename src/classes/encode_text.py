@@ -7,6 +7,7 @@ import seaborn as sns
 from typing import Tuple, Dict, Any
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from wordcloud import WordCloud
 
 
 class TextEncoder:
@@ -248,6 +249,99 @@ class TextEncoder:
             yaxis_title="TF-IDF Weight (normalized)",
             height=600,
             showlegend=True
+        )
+        
+        return fig
+    
+    def plot_word_cloud(self, use_tfidf=True, max_words=100, colormap='viridis') -> go.Figure:
+        """
+        Create a word cloud visualization using the WordCloud library.
+        
+        Args:
+            use_tfidf: Whether to use TF-IDF weights (True) or BoW counts (False)
+            max_words: Maximum number of words to include
+            colormap: Matplotlib colormap for word colors
+        
+        Returns:
+            Plotly Figure with word cloud visualization
+        """
+        from wordcloud import WordCloud
+        import matplotlib.pyplot as plt
+        import io
+        from PIL import Image
+        import numpy as np
+        
+        if self.bow_matrix is None or self.tfidf_matrix is None:
+            raise ValueError("Must call fit_transform first")
+        
+        # Get word importance based on selected method
+        if use_tfidf:
+            importance = np.array(self.tfidf_matrix.mean(axis=0)).flatten()
+            title = "TF-IDF Word Cloud"
+        else:
+            importance = np.array(self.bow_matrix.sum(axis=0)).flatten()
+            title = "Bag of Words Cloud"
+        
+        # Create dictionary of word frequencies
+        word_freq = {word: freq for word, freq in zip(self.feature_names, importance) if freq > 0}
+        
+        # Generate word cloud
+        wordcloud = WordCloud(
+            width=800,
+            height=500,
+            background_color='white',
+            max_words=max_words,
+            colormap=colormap,
+            prefer_horizontal=0.9,
+            relative_scaling=1,  # Importance impacts size but not too extremely
+            min_font_size=1,
+            max_font_size=100
+        ).generate_from_frequencies(word_freq)
+        
+        # Convert word cloud to image
+        img_bytes = io.BytesIO()
+        wordcloud.to_image().save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        
+        # Create plotly figure from image
+        fig = go.Figure()
+        
+        # Add image
+        fig.add_layout_image(
+            dict(
+                source=Image.open(img_bytes),
+                x=0,
+                y=1,
+                xref="paper",
+                yref="paper",
+                sizex=1,
+                sizey=1,
+                sizing="stretch",
+                opacity=1,
+                layer="below"
+            )
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title=title,
+            xaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, 1],
+                visible=False
+            ),
+            yaxis=dict(
+                showgrid=False,
+                showticklabels=False,
+                zeroline=False,
+                range=[0, 1],
+                visible=False
+            ),
+            width=800,
+            height=500,
+            margin=dict(l=0, r=0, t=30, b=0),
         )
         
         return fig
