@@ -7,6 +7,12 @@ from nltk.tokenize import word_tokenize
 from typing import List, Optional
 from src.utils.nltk_setup_data import setup_nltk_data
 
+import warnings
+
+# Filter all RuntimeWarnings globally
+warnings.filterwarnings('ignore', category=RuntimeWarning)
+        
+
 class TextPreprocessor:
     def __init__(self, language: str = 'english'):
         """Initialize with language settings"""
@@ -71,3 +77,28 @@ class TextPreprocessor:
         """Get statistics for a batch of texts"""
         stats = [self.get_preprocessing_stats(text) for text in texts]
         return pd.DataFrame(stats)
+    
+    def extract_top_category(self, category_tree: str) -> str:
+        """
+        Extract the first (top-level) category from a category tree string.
+        
+        Args:
+            category_tree: String containing the full category hierarchy
+                e.g. ["Baby Care >> Baby Bath & Skin >> Baby Bath Towels"]
+                
+        Returns:
+            First category as string (e.g., "Baby Care")
+        """
+        if not isinstance(category_tree, str):
+            return ""
+            
+        # Remove brackets if present
+        if category_tree.startswith('[') and category_tree.endswith(']'):
+            category_tree = category_tree[1:-1].strip('"\'')
+            
+        # Split by ">>" and get first category
+        categories = category_tree.split(">>")
+        if categories:
+            return categories[0].strip()
+        
+        return ""

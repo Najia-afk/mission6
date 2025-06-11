@@ -138,7 +138,8 @@ class TextEncoder:
         
         # Take top features based on combined importance
         n_features = min(20, len(feature_scores))  # Limit to readable number
-        plot_data = feature_scores.head(n_features)
+        plot_data = feature_scores.copy()
+        plot_data = plot_data.head(n_features)
         
         # Calculate difference for color coding
         plot_data['diff'] = plot_data['tfidf_pct'] - plot_data['bow_pct']
