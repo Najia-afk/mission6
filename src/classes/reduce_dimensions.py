@@ -9,6 +9,7 @@ from sklearn.metrics import silhouette_score, silhouette_samples
 from sklearn.cluster import KMeans, MiniBatchKMeans
 from scipy.spatial.distance import pdist, squareform
 from sklearn.manifold import MDS
+from sklearn import metrics  # Add this import for adjusted_rand_score
 from typing import Dict, Any, Tuple, Optional, List, Union
 
 class DimensionalityReducer:
@@ -522,6 +523,129 @@ class DimensionalityReducer:
                 showticklabels=False
             ),
             plot_bgcolor='rgba(240, 240, 240, 0.5)'
+        )
+        
+        return fig
+    
+    def evaluate_clustering(self, X: np.ndarray, true_labels: Union[np.ndarray, pd.Series], 
+                       n_clusters: int = None, use_tsne: bool = True) -> Dict[str, Any]:
+        """
+        Perform clustering and evaluate against true labels using Adjusted Rand Index.
+        
+        Parameters:
+        -----------
+        X : array-like
+            Input data for clustering
+        true_labels : array-like
+            True category labels
+        n_clusters : int, optional
+            Number of clusters (defaults to number of unique true labels)
+        use_tsne : bool
+            Whether to cluster on t-SNE results (True) or original data (False)
+            
+        Returns:
+        --------
+        result : dict
+            Dictionary containing cluster evaluation results and dataframe
+        """
+        # Convert to array/Series as needed
+        if isinstance(true_labels, pd.Series):
+            true_labels_array = true_labels.values
+        else:
+            true_labels_array = np.array(true_labels)
+        
+        # Determine number of clusters if not specified
+        if n_clusters is None:
+            n_clusters = len(np.unique(true_labels_array))
+        
+        # Decide what data to cluster
+        if use_tsne:
+            # Apply t-SNE if not already done
+            if self.tsne_results is None:
+                print("Running t-SNE dimensionality reduction...")
+                self.fit_transform_tsne(X)
+            
+            # Use t-SNE results for clustering
+            cluster_data = self.tsne_results
+        else:
+            # Use original data (dense format if sparse)
+            cluster_data = X.toarray() if hasattr(X, 'toarray') else X
+        
+        # Perform K-means clustering
+        print(f"Clustering into {n_clusters} clusters...")
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        cluster_labels = kmeans.fit_predict(cluster_data)
+        
+        # Create dataframe with results
+        df_result = pd.DataFrame()
+        
+        # Add t-SNE coordinates if available
+        if self.tsne_results is not None:
+            df_result['tsne1'] = self.tsne_results[:, 0]
+            df_result['tsne2'] = self.tsne_results[:, 1]
+        
+        # Add cluster assignments
+        df_result['cluster'] = cluster_labels
+        
+        # Add true labels
+        if isinstance(true_labels, pd.Series):
+            df_result['true_category'] = true_labels.values
+        else:
+            df_result['true_category'] = true_labels
+        
+        # Calculate Adjusted Rand Index
+        ari_score = metrics.adjusted_rand_score(true_labels_array, cluster_labels)
+        
+        # Calculate cluster composition as percentages
+        cluster_category_distribution = pd.crosstab(
+            df_result["cluster"], 
+            df_result["true_category"], 
+            normalize='index'
+        ) * 100  # Convert to percentage
+        
+        return {
+            'dataframe': df_result,
+            'ari_score': ari_score,
+            'cluster_distribution': cluster_category_distribution,
+            'kmeans_model': kmeans
+        }
+    
+    def plot_cluster_category_heatmap(self, cluster_distribution: pd.DataFrame, 
+                                     figsize: Tuple[int, int] = (800, 600)) -> go.Figure:
+        """
+        Create a heatmap visualization of cluster composition by true categories.
+        
+        Parameters:
+        -----------
+        cluster_distribution : DataFrame
+            Crosstab of clusters vs categories (output from evaluate_clustering)
+        figsize : tuple
+            Figure size (width, height)
+            
+        Returns:
+        --------
+        fig : plotly Figure
+            Heatmap visualization
+        """
+        # Create figure
+        fig = go.Figure(data=go.Heatmap(
+            z=cluster_distribution.values,
+            x=cluster_distribution.columns,
+            y=cluster_distribution.index,
+            colorscale='YlGnBu',
+            text=cluster_distribution.round(1).values,
+            texttemplate='%{text:.1f}',
+            textfont={"size": 12},
+            hoverongaps=False
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title='Cluster Composition by True Category (%)',
+            xaxis_title='True Category',
+            yaxis_title='Cluster',
+            height=figsize[1],
+            width=figsize[0]
         )
         
         return fig
