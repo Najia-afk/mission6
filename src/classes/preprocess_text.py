@@ -50,27 +50,53 @@ class TextPreprocessor:
         if pd.isna(text):
             return {
                 'status': 'empty_input',
-                'stats': None
+                'original_text': '',
+                'processed_text': '',
+                'original_length': 0,
+                'processed_length': 0,
+                'original_words': 0,
+                'processed_words': 0,
+                'removed_stopwords': 0,
+                'stopwords_percentage': 0.0,
+                'reduction_percentage': 0.0,
+                'unique_words_original': 0,
+                'unique_words_processed': 0,
+                'sample_removed_words': []
             }
             
-        original = str(text)
-        cleaned = self.preprocess(text)
+        original = str(text).strip()
         
-        # Original text stats
-        orig_tokens = word_tokenize(original.lower())
-        orig_stop_words = [w for w in orig_tokens if w in self.stop_words]
+        # Step-by-step preprocessing to track changes
+        step1_lower = original.lower()
+        step2_clean = re.sub(r'[^a-zA-Z\s]', '', step1_lower)
+        step3_tokens = word_tokenize(step2_clean)
+        
+        # Find stopwords and content words separately
+        stopwords_found = [token for token in step3_tokens if token in self.stop_words]
+        content_tokens = [token for token in step3_tokens if token not in self.stop_words]
+        
+        # Apply lemmatization to content words
+        lemmatized_tokens = [self.lemmatizer.lemmatize(token) for token in content_tokens]
+        processed_text = ' '.join(lemmatized_tokens)
+        
+        # Calculate meaningful statistics
+        orig_word_count = len(step3_tokens) if step3_tokens else 0
+        processed_word_count = len(lemmatized_tokens)
+        stopwords_removed = len(stopwords_found)
         
         return {
+            'original_text': original,
+            'processed_text': processed_text,
             'original_length': len(original),
-            'processed_length': len(cleaned),
-            'original_words': len(orig_tokens),
-            'processed_words': len(cleaned.split()),
-            'removed_stopwords': len(orig_stop_words),
-            'stopwords_percentage': round(len(orig_stop_words) / len(orig_tokens) * 100, 2),
-            'reduction_percentage': round((len(original) - len(cleaned)) / len(original) * 100, 2),
-            'unique_words_original': len(set(orig_tokens)),
-            'unique_words_processed': len(set(cleaned.split())),
-            'sample_removed_words': list(set(orig_stop_words))[:5]
+            'processed_length': len(processed_text),
+            'original_words': orig_word_count,
+            'processed_words': processed_word_count,
+            'removed_stopwords': stopwords_removed,
+            'stopwords_percentage': round(stopwords_removed / orig_word_count * 100, 2) if orig_word_count > 0 else 0.0,
+            'reduction_percentage': round((orig_word_count - processed_word_count) / orig_word_count * 100, 2) if orig_word_count > 0 else 0.0,
+            'unique_words_original': len(set(step3_tokens)),
+            'unique_words_processed': len(set(lemmatized_tokens)),
+            'sample_removed_words': list(set(stopwords_found))[:5]
         }
 
     def get_batch_stats(self, texts: List[str]) -> pd.DataFrame:
