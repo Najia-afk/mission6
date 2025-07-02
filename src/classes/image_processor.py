@@ -17,6 +17,7 @@ from skimage.feature import local_binary_pattern, graycomatrix, graycoprops
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
+from typing import Dict, Any, List, Tuple  # Add this import for type hints
 warnings.filterwarnings('ignore')
 
 
@@ -37,6 +38,7 @@ class ImageProcessor:
         self.quality_threshold = quality_threshold
         self.processed_images = []
         self.processing_stats = {}
+        self.feature_cache = {}
         self.feature_times = []
         
     def assess_image_quality(self, image_path):
@@ -155,85 +157,127 @@ class ImageProcessor:
                 'preprocessing_applied': []
             }
     
-    def extract_basic_features(self, image):
+    def extract_basic_features(self, image_input) -> Dict[str, Any]:
         """
-        Extract basic image features (SIFT, LBP, GLCM, Gabor)
+        Extract basic features from an image using ORB descriptors and color histograms.
         
         Args:
-            image (np.ndarray): Preprocessed image
+            image_input: Either a path to image file (str) or processed image array (np.ndarray)
             
         Returns:
-            dict: Dictionary of extracted features
+            Dictionary containing extracted features and metadata
         """
-        features = {}
-        
         try:
-            # Convert to grayscale if needed
+            # Handle both file path and processed image array
+            if isinstance(image_input, str):
+                # Load image from path
+                image = cv2.imread(image_input)
+                if image is None:
+                    return {"success": False, "error": "Could not load image"}
+            elif isinstance(image_input, np.ndarray):
+                # Use processed image array
+                image = image_input
+                # Convert from float to uint8 if necessary
+                if image.dtype == np.float32 or image.dtype == np.float64:
+                    image = (image * 255).astype(np.uint8)
+            else:
+                return {"success": False, "error": "Invalid image input type"}
+            
+            # Ensure image has the right shape
+            if len(image.shape) == 3 and image.shape[2] == 3:
+                # Convert BGR to RGB if needed
+                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            elif len(image.shape) == 2:
+                gray = image
+            else:
+                return {"success": False, "error": "Invalid image format"}
+            
+            # Initialize ORB detector
+            orb = cv2.ORB_create(nfeatures=500)
+            
+            # Detect keypoints and compute descriptors
+            try:
+                keypoints, descriptors = orb.detectAndCompute(gray, None)
+            except Exception as e:
+                print(f"ORB detection failed: {e}")
+                keypoints, descriptors = [], None
+            
+            # Extract color histogram features (HSV) - only if color image
             if len(image.shape) == 3:
-                gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_BGR2GRAY)
+                hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+                hist_h = cv2.calcHist([hsv], [0], None, [50], [0, 180])
+                hist_s = cv2.calcHist([hsv], [1], None, [60], [0, 256])
+                hist_v = cv2.calcHist([hsv], [2], None, [60], [0, 256])
+                
+                # Flatten histograms
+                color_features = np.concatenate([
+                    hist_h.flatten(),
+                    hist_s.flatten(),
+                    hist_v.flatten()
+                ])
             else:
-                gray = (image * 255).astype(np.uint8)
+                # Grayscale image - create dummy color features
+                color_features = np.zeros(170)  # 50 + 60 + 60
             
-            # 1. SIFT Features
-            sift = cv2.SIFT_create()
-            keypoints, descriptors = sift.detectAndCompute(gray, None)
+            # Basic image statistics
+            basic_stats = np.array([
+                image.shape[0],  # height
+                image.shape[1],  # width
+                image.shape[2] if len(image.shape) > 2 else 1,  # channels
+                np.mean(image),  # mean intensity
+                np.std(image),   # std intensity
+                len(keypoints)   # number of keypoints
+            ])
             
+            # Combine all features
             if descriptors is not None and len(descriptors) > 0:
-                features['sift_mean'] = np.mean(descriptors, axis=0)
-                features['sift_std'] = np.std(descriptors, axis=0)
-                features['sift_keypoints_count'] = len(keypoints)
+                # Use bag of visual words approach - take mean of descriptors
+                descriptor_features = np.mean(descriptors, axis=0)
+                # If we have fewer than expected descriptors, pad with zeros
+                if len(descriptor_features) < 32:
+                    descriptor_features = np.pad(descriptor_features, 
+                                            (0, 32 - len(descriptor_features)), 
+                                            'constant')
+                else:
+                    descriptor_features = descriptor_features[:32]  # Truncate if too long
             else:
-                features['sift_mean'] = np.zeros(128)
-                features['sift_std'] = np.zeros(128)
-                features['sift_keypoints_count'] = 0
+                # No descriptors found, use zeros
+                descriptor_features = np.zeros(32)
             
-            # 2. Local Binary Pattern (LBP)
-            radius = 1
-            n_points = 8 * radius
-            lbp = local_binary_pattern(gray, n_points, radius, method='uniform')
-            lbp_hist, _ = np.histogram(lbp.ravel(), bins=n_points + 2, range=(0, n_points + 2))
-            features['lbp_histogram'] = lbp_hist.astype(float)
+            # Combine all features
+            all_features = np.concatenate([
+                basic_stats,
+                color_features,
+                descriptor_features
+            ])
             
-            # 3. Gray-Level Co-occurrence Matrix (GLCM)
-            distances = [1]
-            angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
-            glcm = graycomatrix(gray, distances, angles, symmetric=True, normed=True)
-            
-            features['glcm_contrast'] = graycoprops(glcm, 'contrast').flatten()
-            features['glcm_dissimilarity'] = graycoprops(glcm, 'dissimilarity').flatten()
-            features['glcm_homogeneity'] = graycoprops(glcm, 'homogeneity').flatten()
-            features['glcm_energy'] = graycoprops(glcm, 'energy').flatten()
-            
-            # 4. Gabor Filters
-            gabor_responses = []
-            frequencies = [0.1, 0.3, 0.5]
-            angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
-            
-            for freq in frequencies:
-                for angle in angles:
-                    real, _ = cv2.getGaborKernel((21, 21), 5, angle, 2*np.pi*freq, 0.5, 0, ktype=cv2.CV_32F)
-                    filtered = cv2.filter2D(gray, cv2.CV_8UC3, real)
-                    gabor_responses.append(np.mean(filtered))
-                    gabor_responses.append(np.std(filtered))
-            
-            features['gabor_responses'] = np.array(gabor_responses)
-            
-            return features
+            return {
+                "success": True,
+                "features": all_features,
+                "feature_names": self._get_feature_names(),
+                "keypoints_count": len(keypoints),
+                "image_shape": image.shape
+            }
             
         except Exception as e:
-            print(f"Error extracting basic features: {e}")
-            # Return default features
-            return {
-                'sift_mean': np.zeros(128),
-                'sift_std': np.zeros(128),
-                'sift_keypoints_count': 0,
-                'lbp_histogram': np.zeros(10),
-                'glcm_contrast': np.zeros(4),
-                'glcm_dissimilarity': np.zeros(4),
-                'glcm_homogeneity': np.zeros(4),
-                'glcm_energy': np.zeros(4),
-                'gabor_responses': np.zeros(24)
-            }
+            return {"success": False, "error": str(e)}
+
+    def _get_feature_names(self) -> List[str]:
+        """Generate feature names for basic features"""
+        names = []
+        
+        # Basic stats
+        names.extend(['height', 'width', 'channels', 'mean_intensity', 'std_intensity', 'keypoints_count'])
+        
+        # Color histograms
+        names.extend([f'hist_h_{i}' for i in range(50)])
+        names.extend([f'hist_s_{i}' for i in range(60)])
+        names.extend([f'hist_v_{i}' for i in range(60)])
+        
+        # ORB descriptors
+        names.extend([f'orb_desc_{i}' for i in range(32)])
+        
+        return names
     
     def process_image_batch(self, image_paths, max_images=None):
         """
@@ -266,7 +310,7 @@ class ImageProcessor:
             processed, original, processing_info = self.preprocess_image(img_path)
             
             if processing_info['success']:
-                # Extract basic features
+                # Extract basic features from the processed image
                 basic_features = self.extract_basic_features(processed)
                 
                 results['processed_images'].append(processed)
@@ -278,7 +322,7 @@ class ImageProcessor:
                 print(f"  Failed: {processing_info['error']}")
         
         # Calculate summary statistics
-        success_rate = len(results['successful_paths']) / len(image_paths)
+        success_rate = len(results['successful_paths']) / len(image_paths) if image_paths else 0
         results['summary'] = {
             'total_images': len(image_paths),
             'successful': len(results['successful_paths']),
@@ -306,58 +350,42 @@ class ImageProcessor:
         if not basic_features_list:
             return np.array([]), []
         
-        # Combine all features into a single matrix
+        # Filter out failed feature extractions
+        successful_features = [f for f in basic_features_list if f.get('success', False)]
+        
+        if not successful_features:
+            print("No successful feature extractions found")
+            return np.array([]), []
+        
+        # Extract features and names from the first successful extraction
+        first_features = successful_features[0]
+        feature_names = first_features.get('feature_names', [])
+        
+        # Build feature matrix
         feature_matrix = []
-        feature_names = []
         
-        for features in basic_features_list:
-            row = []
-            
-            # SIFT features (mean only for simplicity)
-            sift_summary = [
-                np.mean(features['sift_mean']),
-                np.std(features['sift_mean']),
-                features['sift_keypoints_count']
-            ]
-            row.extend(sift_summary)
-            if not feature_names:  # Only set names once
-                feature_names.extend(['sift_mean_avg', 'sift_mean_std', 'sift_keypoints'])
-            
-            # LBP features (histogram summary)
-            lbp_summary = [
-                np.mean(features['lbp_histogram']),
-                np.std(features['lbp_histogram']),
-                np.max(features['lbp_histogram'])
-            ]
-            row.extend(lbp_summary)
-            if len(feature_names) == 3:  # Only set names once
-                feature_names.extend(['lbp_mean', 'lbp_std', 'lbp_max'])
-            
-            # GLCM features (all statistics)
-            row.extend(features['glcm_contrast'])
-            row.extend(features['glcm_dissimilarity'])
-            row.extend(features['glcm_homogeneity'])
-            row.extend(features['glcm_energy'])
-            if len(feature_names) == 6:  # Only set names once
-                feature_names.extend([f'glcm_contrast_{i}' for i in range(4)])
-                feature_names.extend([f'glcm_dissimilarity_{i}' for i in range(4)])
-                feature_names.extend([f'glcm_homogeneity_{i}' for i in range(4)])
-                feature_names.extend([f'glcm_energy_{i}' for i in range(4)])
-            
-            # Gabor features (summary statistics)
-            gabor_summary = [
-                np.mean(features['gabor_responses']),
-                np.std(features['gabor_responses']),
-                np.max(features['gabor_responses']),
-                np.min(features['gabor_responses'])
-            ]
-            row.extend(gabor_summary)
-            if len(feature_names) == 22:  # Only set names once
-                feature_names.extend(['gabor_mean', 'gabor_std', 'gabor_max', 'gabor_min'])
-            
-            feature_matrix.append(row)
+        for features_dict in successful_features:
+            if features_dict.get('success', False):
+                feature_vector = features_dict.get('features', [])
+                if len(feature_vector) > 0:
+                    feature_matrix.append(feature_vector)
         
-        return np.array(feature_matrix), feature_names
+        if not feature_matrix:
+            print("No valid feature vectors found")
+            return np.array([]), []
+        
+        feature_matrix = np.array(feature_matrix)
+        
+        # Ensure feature names match matrix dimensions
+        if len(feature_names) != feature_matrix.shape[1]:
+            print(f"Warning: Feature names ({len(feature_names)}) don't match matrix columns ({feature_matrix.shape[1]})")
+            # Generate generic names if mismatch
+            feature_names = [f'feature_{i}' for i in range(feature_matrix.shape[1])]
+        
+        print(f"Created feature matrix: {feature_matrix.shape}")
+        print(f"Feature names: {len(feature_names)}")
+        
+        return feature_matrix, feature_names
     
     def analyze_features_quality(self, feature_matrix, feature_names):
         """
