@@ -2,7 +2,7 @@ import re
 import nltk
 import pandas as pd
 from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import WordNetLemmatizer, PorterStemmer
 from nltk.tokenize import word_tokenize
 from typing import List, Optional
 from src.utils.nltk_setup_data import setup_nltk_data
@@ -21,7 +21,43 @@ class TextPreprocessor:
         
         self.language = language
         self.lemmatizer = WordNetLemmatizer()
+        self.stemmer = PorterStemmer()
         self.stop_words = set(stopwords.words(language))
+    
+    def tokenize(self, text: str) -> List[str]:
+        """Tokenize a sentence into words"""
+        if pd.isna(text) or not text:
+            return []
+        # Convert to lowercase and tokenize
+        text = text.lower()
+        tokens = word_tokenize(text)
+        return tokens
+    
+    def stem(self, text: str) -> str:
+        """Apply stemming to a sentence"""
+        if pd.isna(text) or not text:
+            return ""
+        tokens = self.tokenize(text)
+        # Remove punctuation and apply stemming
+        clean_tokens = []
+        for token in tokens:
+            if re.match(r'^[a-zA-Z]+$', token):  # Only alphabetic tokens
+                stemmed = self.stemmer.stem(token)
+                clean_tokens.append(stemmed)
+        return ' '.join(clean_tokens)
+    
+    def lemmatize(self, text: str) -> str:
+        """Apply lemmatization to a sentence"""
+        if pd.isna(text) or not text:
+            return ""
+        tokens = self.tokenize(text)
+        # Remove punctuation and apply lemmatization
+        clean_tokens = []
+        for token in tokens:
+            if re.match(r'^[a-zA-Z]+$', token):  # Only alphabetic tokens
+                lemmatized = self.lemmatizer.lemmatize(token)
+                clean_tokens.append(lemmatized)
+        return ' '.join(clean_tokens)
         
         
     def preprocess(self, text: str) -> str:
@@ -128,3 +164,7 @@ class TextPreprocessor:
             return categories[0].strip()
         
         return ""
+
+    def process_batch(self, texts: List[str]) -> List[str]:
+        """Process a batch of texts efficiently"""
+        return [self.preprocess(text) for text in texts]
