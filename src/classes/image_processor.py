@@ -27,7 +27,7 @@ class ImageProcessor:
     Comprehensive image processing pipeline for e-commerce products
     """
     
-    def __init__(self, target_size=(224, 224), quality_threshold=0.8):
+    def __init__(self, target_size=(224, 224), quality_threshold=0.65):
         """
         Initialize the image processor
         
@@ -573,7 +573,7 @@ class ImageProcessor:
         
         return fig
     
-    def ensure_sample_images(self, image_dir='dataset/Flipkart/Images', num_samples=20):
+    def ensure_sample_images(self, image_dir='dataset/Flipkart/Images', num_samples=20, random_seed=None):
         """
         Ensures that sample images exist for demonstration purposes.
         Creates sample images of different product categories if directory doesn't exist.
@@ -581,19 +581,32 @@ class ImageProcessor:
         Args:
             image_dir (str): Path to the image directory
             num_samples (int): Number of sample images to create
+            random_seed (int): Random seed for reproducible selection of images
             
         Returns:
             dict: Information about available images
         """
-        
+        # Set random seed if provided
+        if random_seed is not None:
+            import random
+            random.seed(random_seed)
+            
         # Get list of available images
         available_images = [f for f in os.listdir(image_dir) 
-                           if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                        if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        
+        # Randomize the list if requested
+        if random_seed is not None:
+            import random
+            random.shuffle(available_images)
+            # Limit to requested number of samples if needed
+            if num_samples and num_samples < len(available_images):
+                available_images = available_images[:num_samples]
         
         return {
             'image_dir': image_dir,
             'available_images': available_images,
             'count': len(available_images),
-            'sample_created': not os.path.exists(image_dir)
+            'sample_created': not os.path.exists(image_dir),
+            'random_seed_used': random_seed
         }
-        
