@@ -2,7 +2,7 @@ import re
 import nltk
 import pandas as pd
 from nltk.corpus import stopwords
-from nltk.stem import WordNetLemmatizer
+from nltk.stem import WordNetLemmatizer, PorterStemmer
 from nltk.tokenize import word_tokenize
 from typing import List, Optional
 from src.utils.nltk_setup_data import setup_nltk_data
@@ -21,11 +21,12 @@ class TextPreprocessor:
         
         self.language = language
         self.lemmatizer = WordNetLemmatizer()
+        self.stemmer = PorterStemmer()
         self.stop_words = set(stopwords.words(language))
         
         
     def preprocess(self, text: str) -> str:
-        """Full preprocessing pipeline"""
+        """Full preprocessing pipeline with lemmatization"""
         # Convert to lowercase
         text = text.lower()
         
@@ -44,6 +45,100 @@ class TextPreprocessor:
         
         # Join tokens back to string
         return ' '.join(tokens)
+    
+    def stem_text(self, text: str) -> str:
+        """
+        Apply stemming to text (for CE3 requirement)
+        Similar to preprocess but uses stemming instead of lemmatization
+        """
+        if pd.isna(text):
+            return ""
+            
+        # Convert to lowercase
+        text = str(text).lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Tokenize
+        tokens = word_tokenize(text)
+        
+        # Remove stopwords and apply stemming
+        tokens = [
+            self.stemmer.stem(token)
+            for token in tokens
+            if token not in self.stop_words
+        ]
+        
+        # Join tokens back to string
+        return ' '.join(tokens)
+    
+    def tokenize_sentence(self, text: str) -> List[str]:
+        """
+        Tokenize a sentence into words without additional preprocessing
+        
+        Args:
+            text: Input text to tokenize
+            
+        Returns:
+            List of tokens
+        """
+        if pd.isna(text):
+            return []
+            
+        return word_tokenize(str(text))
+        
+    def stem_sentence(self, text: str) -> str:
+        """
+        Apply stemming to text without removing stopwords
+        
+        Args:
+            text: Input text to stem
+            
+        Returns:
+            Stemmed text
+        """
+        if pd.isna(text):
+            return ""
+            
+        # Convert to lowercase
+        text = str(text).lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Tokenize and stem
+        tokens = word_tokenize(text)
+        stemmed_tokens = [self.stemmer.stem(token) for token in tokens]
+        
+        # Join tokens back to string
+        return ' '.join(stemmed_tokens)
+        
+    def lemmatize_sentence(self, text: str) -> str:
+        """
+        Apply lemmatization to text without removing stopwords
+        
+        Args:
+            text: Input text to lemmatize
+            
+        Returns:
+            Lemmatized text
+        """
+        if pd.isna(text):
+            return ""
+            
+        # Convert to lowercase
+        text = str(text).lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Tokenize and lemmatize
+        tokens = word_tokenize(text)
+        lemmatized_tokens = [self.lemmatizer.lemmatize(token) for token in tokens]
+        
+        # Join tokens back to string
+        return ' '.join(lemmatized_tokens)
     
     def get_preprocessing_stats(self, text: str) -> dict:
         """Get detailed statistics about preprocessing effects"""
