@@ -18,6 +18,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import warnings
 from typing import Dict, Any, List, Tuple  # Add this import for type hints
+from tqdm.notebook import tqdm  # Import tqdm for progress bars
 warnings.filterwarnings('ignore')
 
 
@@ -303,9 +304,8 @@ class ImageProcessor:
         
         print(f"Processing {len(image_paths)} images...")
         
-        for i, img_path in enumerate(image_paths):
-            print(f"Processing image {i+1}/{len(image_paths)}: {os.path.basename(img_path)}")
-            
+        # Use tqdm for progress tracking instead of individual prints
+        for img_path in tqdm(image_paths, desc="Processing images", unit="img"):
             # Preprocess image
             processed, original, processing_info = self.preprocess_image(img_path)
             
@@ -319,7 +319,6 @@ class ImageProcessor:
                 results['successful_paths'].append(img_path)
             else:
                 results['failed_paths'].append((img_path, processing_info['error']))
-                print(f"  Failed: {processing_info['error']}")
         
         # Calculate summary statistics
         success_rate = len(results['successful_paths']) / len(image_paths) if image_paths else 0
@@ -573,3 +572,28 @@ class ImageProcessor:
         )
         
         return fig
+    
+    def ensure_sample_images(self, image_dir='dataset/Flipkart/Images', num_samples=20):
+        """
+        Ensures that sample images exist for demonstration purposes.
+        Creates sample images of different product categories if directory doesn't exist.
+        
+        Args:
+            image_dir (str): Path to the image directory
+            num_samples (int): Number of sample images to create
+            
+        Returns:
+            dict: Information about available images
+        """
+        
+        # Get list of available images
+        available_images = [f for f in os.listdir(image_dir) 
+                           if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+        
+        return {
+            'image_dir': image_dir,
+            'available_images': available_images,
+            'count': len(available_images),
+            'sample_created': not os.path.exists(image_dir)
+        }
+        
