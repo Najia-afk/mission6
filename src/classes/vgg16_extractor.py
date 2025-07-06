@@ -105,6 +105,165 @@ class VGG16FeatureExtractor:
         print(f"Features extracted: Shape={features.shape}")
         return features
     
+    def find_optimal_pca_components(
+        self, 
+        features: np.ndarray, 
+        max_components: int = 50, 
+        step_size: int = 5
+    ) -> Tuple[int, go.Figure]:
+        """
+        Find optimal number of PCA components using elbow method
+        with both variance explained and silhouette score analysis
+        
+        Args:
+            features: Feature matrix
+            max_components: Maximum number of components to test
+            step_size: Step size for testing components
+            
+        Returns:
+            Tuple containing:
+                - Optimal number of components
+                - Plotly figure with elbow plots
+        """
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        from sklearn.cluster import KMeans
+        from sklearn.metrics import silhouette_score
+        from sklearn.decomposition import PCA
+        from sklearn.preprocessing import StandardScaler
+        from tqdm.notebook import tqdm  # Import tqdm for progress tracking
+        
+        print("🔍 Finding optimal number of PCA components...")
+        
+        # Create a range of potential component numbers to test
+        max_components = min(max_components, features.shape[1])
+        component_range = np.arange(step_size, max_components + 1, step_size)
+        
+        # Arrays to store results
+        variance_ratios = []
+        silhouette_scores = []
+        n_components_list = []
+        
+        # Scale features once (reused for all component tests)
+        scaler = StandardScaler()
+        features_scaled = scaler.fit_transform(features)
+        
+        print(f"Testing {len(component_range)} different component counts...")
+        # Add tqdm progress bar for component testing
+        for n_comp in tqdm(component_range, desc="Testing PCA components", unit="components"):
+            # Apply PCA with current number of components
+            pca = PCA(n_components=n_comp)
+            features_pca_test = pca.fit_transform(features_scaled)
+            
+            # Store cumulative explained variance
+            cum_variance = np.sum(pca.explained_variance_ratio_)
+            variance_ratios.append(cum_variance)
+            n_components_list.append(n_comp)
+            
+            # Perform clustering to calculate silhouette score
+            if features_pca_test.shape[0] > n_comp:  # Ensure we have enough samples
+                n_clusters = min(5, features_pca_test.shape[0]-1)
+                if n_clusters > 1:  # Need at least 2 clusters
+                    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+                    cluster_labels = kmeans.fit_predict(features_pca_test)
+                    
+                    # Calculate silhouette score if we have multiple clusters
+                    if len(np.unique(cluster_labels)) > 1:
+                        sil_score = silhouette_score(features_pca_test, cluster_labels)
+                        silhouette_scores.append(sil_score)
+                    else:
+                        silhouette_scores.append(0)
+                else:
+                    silhouette_scores.append(0)
+            else:
+                silhouette_scores.append(0)
+            
+        # Create visualization
+        fig = make_subplots(
+            rows=1, cols=2, 
+            subplot_titles=(
+                "Explained Variance vs Components", 
+                "Silhouette Score vs Components"
+            ),
+            shared_xaxes=True
+        )
+        
+        # Add variance plot
+        fig.add_trace(
+            go.Scatter(
+                x=n_components_list, 
+                y=variance_ratios, 
+                mode='lines+markers',
+                name='Explained Variance', 
+                marker=dict(size=8),
+                line=dict(color='blue', width=2)
+            ),
+            row=1, col=1
+        )
+        
+        # Add silhouette plot
+        fig.add_trace(
+            go.Scatter(
+                x=n_components_list, 
+                y=silhouette_scores, 
+                mode='lines+markers',
+                name='Silhouette Score', 
+                marker=dict(size=8),
+                line=dict(color='red', width=2)
+            ),
+            row=1, col=2
+        )
+        
+        # Add 0.95 variance threshold line
+        fig.add_hline(
+            y=0.95, 
+            line=dict(color='green', dash='dash'), 
+            row=1, col=1
+        )
+        fig.add_annotation(
+            x=max_components/2, 
+            y=0.96, 
+            text="95% Variance", 
+            showarrow=False, 
+            row=1, col=1
+        )
+        
+        # Find optimal components based on silhouette score
+        if silhouette_scores:
+            optimal_components = n_components_list[np.argmax(silhouette_scores)]
+            
+            # Add vertical line at optimal components
+            fig.add_vline(
+                x=optimal_components, 
+                line=dict(color='green', dash='dash'), 
+                row=1, col=2
+            )
+            fig.add_annotation(
+                x=optimal_components, 
+                y=max(silhouette_scores)/2, 
+                text=f"Optimal: {optimal_components}", 
+                showarrow=False, 
+                row=1, col=2
+            )
+        else:
+            optimal_components = component_range[0]
+        
+        # Update layout
+        fig.update_layout(
+            title='PCA Component Optimization Analysis',
+            height=500, 
+            width=1000,
+            template='plotly_white',
+            showlegend=False
+        )
+        
+        fig.update_xaxes(title_text="Number of Components")
+        fig.update_yaxes(title_text="Explained Variance Ratio (Cumulative)", row=1, col=1)
+        fig.update_yaxes(title_text="Silhouette Score", row=1, col=2)
+        
+        print(f"✅ Optimal number of components: {optimal_components}")
+        return optimal_components, fig
+            
     def apply_dimensionality_reduction(
         self, 
         features: np.ndarray, 
