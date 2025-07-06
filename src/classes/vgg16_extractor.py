@@ -39,6 +39,7 @@ class VGG16FeatureExtractor:
         self.layer_name = layer_name
         self.processing_times = []
         self.feature_shape = None
+        self.extracted_features = None
         
         # Initialize the VGG16 model
         print("Initializing VGG16 model...")
@@ -99,6 +100,7 @@ class VGG16FeatureExtractor:
         # Combine all batches
         features = np.vstack(features_list)
         self.feature_shape = features.shape
+        self.extracted_features = features  # Store the extracted features
         
         print(f"Features extracted: Shape={features.shape}")
         return features
