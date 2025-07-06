@@ -542,8 +542,10 @@ class VGG16FeatureExtractor:
         print(f"📊 VGG16 processed {len(vgg16_cluster_labels)} images")
         print(f"📋 Extracted {len(vgg16_categories)} categories")
         print(f"📂 Unique categories: {len(np.unique(vgg16_categories))}")
-        print(f"🎯 Adjusted Rand Index: {vgg16_ari:.4f}")
+        print(f"🎯 Adjusted Rand Index(ARI): {vgg16_ari:.4f}")
+        print(f"🔗 Cluster quality (Silhouette): {clustering_results['silhouette_score']:.3f}")
         print(f"📊 Number of clusters: {len(np.unique(vgg16_cluster_labels))}")
+        print(f"💡 Interpretation: {'Good alignment' if vgg16_ari > 0.5 else 'Moderate alignment' if vgg16_ari > 0.2 else 'Poor alignment'}")
         
         # Category distribution
         print(f"\n🏷️ Category distribution:")
@@ -560,7 +562,6 @@ class VGG16FeatureExtractor:
         })
         
         # 1. t-SNE visualization colored by real categories
-        print("\n🎯 Creating VGG16 t-SNE visualization with real product categories...")
         vgg16_tsne_fig = px.scatter(
             vgg16_tsne_df, 
             x='t-SNE1', 
@@ -600,9 +601,7 @@ class VGG16FeatureExtractor:
             bordercolor="gray",
             borderwidth=1
         )
-        
-        print("📊 VGG16 t-SNE Visualization by Categories:")
-        vgg16_tsne_fig.show()
+    
         
         # 2. Side-by-side comparison: Categories vs Clusters
         print("\n📊 Creating side-by-side comparison: Real Categories vs VGG16 Clusters...")
@@ -691,22 +690,7 @@ class VGG16FeatureExtractor:
         print("🔍 VGG16 Side-by-Side Comparison:")
         comparison_fig.show()
         
-        # Print results summary
-        print(f"\n📈 VGG16 t-SNE Visualization Results:")
-        print(f"   🔍 Method: VGG16 Deep Features + t-SNE")
-        print(f"   📊 Data points: {len(tsne_features)}")
-        print(f"   🏷️ Categories: {len(np.unique(vgg16_categories))}")
-        print(f"   🎯 Clusters: {len(np.unique(vgg16_cluster_labels))}")
-        print(f"   📈 Category separation (ARI): {vgg16_ari:.4f}")
-        print(f"   🔗 Cluster quality (Silhouette): {clustering_results['silhouette_score']:.3f}")
-        
-        print(f"\n🔍 VGG16 Clustering Analysis:")
-        print(f"   📊 Real categories shown: {len(np.unique(vgg16_categories))}")
-        print(f"   🎯 VGG16 clusters found: {len(unique_clusters)}")
-        print(f"   📈 Agreement between categories and clusters: {vgg16_ari:.4f}")
-        print(f"   💡 Interpretation: {'Good alignment' if vgg16_ari > 0.5 else 'Moderate alignment' if vgg16_ari > 0.2 else 'Poor alignment'}")
-        
-        print(f"\n✅ VGG16 analysis and visualization completed!")
+
         
         # Return comprehensive results
         return {
