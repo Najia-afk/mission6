@@ -249,7 +249,8 @@ class VGG16FeatureExtractor:
         original_features: np.ndarray, 
         reduced_features: np.ndarray, 
         clustering_results: Dict[str, Any],
-        processing_times: List[float]
+        processing_times: List[float],
+        pca_info: Optional[Any] = None
     ) -> go.Figure:
         """
         Create a comprehensive analysis dashboard
@@ -259,6 +260,7 @@ class VGG16FeatureExtractor:
             reduced_features: Dimensionality-reduced features
             clustering_results: Results from perform_clustering
             processing_times: List of processing times per image
+            pca_info: PCA object for variance information
             
         Returns:
             plotly.graph_objects.Figure: Dashboard figure
@@ -268,12 +270,12 @@ class VGG16FeatureExtractor:
             subplot_titles=[
                 'Feature Extraction Performance',
                 'Clustering Results',
-                'Feature Dimensionality',
+                'VGG16 Processing Summary',
                 'Processing Time Distribution'
             ],
             specs=[
                 [{"type": "indicator"}, {"type": "scatter"}],
-                [{"type": "bar"}, {"type": "histogram"}]
+                [{"type": "table"}, {"type": "histogram"}]
             ]
         )
         
@@ -340,16 +342,39 @@ class VGG16FeatureExtractor:
                         row=1, col=2
                     )
         
-        # 3. Feature Dimensionality Bar Chart
-        original_dim = original_features.shape[1]
-        reduced_dim = reduced_features.shape[1]
+        # 3. VGG16 Processing Summary Table
+        # Prepare summary data
+        variance_preserved = pca_info.explained_variance_ratio_.sum() if pca_info else 0.0
+        compression_ratio = original_features.shape[1] / reduced_features.shape[1] if reduced_features.shape[1] > 0 else 0
+        
+        summary_data = [
+            ['Original Feature Dimensions', f"{original_features.shape[1]:,}"],
+            ['PCA Reduced Dimensions', f"{reduced_features.shape[1]:,}"],
+            ['Samples Processed', f"{original_features.shape[0]:,}"],
+            ['Compression Ratio', f"{compression_ratio:.1f}x"],
+            ['Variance Preserved', f"{variance_preserved:.1%}"],
+            ['Optimal Clusters', f"{clustering_results['n_clusters']}"],
+            ['Silhouette Score', f"{clustering_results['silhouette_score']:.3f}"],
+            ['Avg Processing Time', f"{np.mean(processing_times):.3f}s/image"],
+            ['Processing Speed', f"{1/np.mean(processing_times):.1f} img/sec"],
+            ['Model Layer Used', f"{self.layer_name}"]
+        ]
         
         fig.add_trace(
-            go.Bar(
-                x=['Original Features', 'Reduced Features'],
-                y=[original_dim, reduced_dim],
-                marker_color=['blue', 'green'],
-                name='Feature Dimensions'
+            go.Table(
+                header=dict(
+                    values=['Metric', 'Value'],
+                    fill_color='lightblue',
+                    align='center',
+                    font=dict(size=12, color='black')
+                ),
+                cells=dict(
+                    values=[[row[0] for row in summary_data],
+                           [row[1] for row in summary_data]],
+                    fill_color='white',
+                    align='center',
+                    font=dict(size=11)
+                )
             ),
             row=2, col=1
         )
