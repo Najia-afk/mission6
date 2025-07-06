@@ -27,6 +27,7 @@ from skimage.filters import gabor
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tqdm.notebook import tqdm  # Import tqdm for progress bars
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -291,11 +292,10 @@ class BasicImageFeatureExtractor:
         if image_names is None:
             image_names = [f'image_{i+1}' for i in range(len(images))]
             
-        print(f"🔄 Extracting features from {len(images)} images...")
+        print(f"🔄 Extracting basic image features from {len(images)} images...")
         
-        for idx, img in enumerate(images):
-            print(f"   Processing image {idx+1}/{len(images)}...")
-            
+        # Use tqdm for progress bar
+        for idx, img in tqdm(enumerate(images), desc="Extracting basic features", total=len(images), unit="img"):
             # Handle different image formats
             if isinstance(img, dict):
                 if 'processed' in img:
