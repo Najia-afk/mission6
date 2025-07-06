@@ -499,3 +499,226 @@ class VGG16FeatureExtractor:
         }
         
         return summary
+
+    def compare_with_categories(self, df, tsne_features, clustering_results, reducer=None):
+        """
+        Comprehensive analysis comparing VGG16 clustering with real product categories
+        
+        Args:
+            df: DataFrame containing product data
+            tsne_features: t-SNE reduced features
+            clustering_results: Results from clustering
+            reducer: Optional dimensionality reducer for additional analysis
+            
+        Returns:
+            dict: Analysis results with visualizations and metrics
+        """
+        from sklearn.metrics import adjusted_rand_score
+        import plotly.express as px
+        import plotly.graph_objects as go
+        from plotly.subplots import make_subplots
+        import pandas as pd
+        
+        print("🔍 VGG16 Analysis: Comparing clustering with real product categories...")
+        
+        # Extract cluster labels
+        vgg16_cluster_labels = clustering_results['labels']
+        
+        # Extract real categories for the processed images
+        vgg16_categories = []
+        for i in range(len(vgg16_cluster_labels)):
+            if i < len(df):
+                category_tree = df.iloc[i]['product_category_tree']
+                main_category = category_tree.split(' >> ')[0].strip('["')
+                vgg16_categories.append(main_category)
+            else:
+                vgg16_categories.append('Unknown')
+        
+        vgg16_categories = np.array(vgg16_categories)
+        
+        # Calculate ARI
+        vgg16_ari = adjusted_rand_score(vgg16_categories, vgg16_cluster_labels)
+        
+        print(f"📊 VGG16 processed {len(vgg16_cluster_labels)} images")
+        print(f"📋 Extracted {len(vgg16_categories)} categories")
+        print(f"📂 Unique categories: {len(np.unique(vgg16_categories))}")
+        print(f"🎯 Adjusted Rand Index: {vgg16_ari:.4f}")
+        print(f"📊 Number of clusters: {len(np.unique(vgg16_cluster_labels))}")
+        
+        # Category distribution
+        print(f"\n🏷️ Category distribution:")
+        unique_cats, counts = np.unique(vgg16_categories, return_counts=True)
+        for cat, count in zip(unique_cats, counts):
+            print(f"   {cat}: {count} images")
+        
+        # Create DataFrame for visualizations
+        vgg16_tsne_df = pd.DataFrame({
+            't-SNE1': tsne_features[:, 0],
+            't-SNE2': tsne_features[:, 1],
+            'Category': vgg16_categories,
+            'Cluster': vgg16_cluster_labels
+        })
+        
+        # 1. t-SNE visualization colored by real categories
+        print("\n🎯 Creating VGG16 t-SNE visualization with real product categories...")
+        vgg16_tsne_fig = px.scatter(
+            vgg16_tsne_df, 
+            x='t-SNE1', 
+            y='t-SNE2', 
+            color='Category',
+            title='🎯 VGG16 Deep Features: t-SNE Visualization by Product Categories',
+            hover_data={'Cluster': True},
+            labels={
+                't-SNE1': 't-SNE Component 1',
+                't-SNE2': 't-SNE Component 2'
+            },
+            color_discrete_sequence=px.colors.qualitative.Set3
+        )
+        
+        vgg16_tsne_fig.update_layout(
+            width=1000,
+            height=700,
+            template='plotly_white',
+            title_x=0.5,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        vgg16_tsne_fig.add_annotation(
+            text=f"📊 {len(vgg16_categories)} images • {len(np.unique(vgg16_categories))} categories • {len(np.unique(vgg16_cluster_labels))} clusters<br>"
+                 f"🎯 ARI Score: {vgg16_ari:.4f} • Silhouette Score: {clustering_results['silhouette_score']:.3f}",
+            xref="paper", yref="paper",
+            x=0.5, y=-0.1, xanchor='center', yanchor='top',
+            showarrow=False, 
+            font=dict(size=12, color="gray"),
+            bgcolor="rgba(255,255,255,0.8)",
+            bordercolor="gray",
+            borderwidth=1
+        )
+        
+        print("📊 VGG16 t-SNE Visualization by Categories:")
+        vgg16_tsne_fig.show()
+        
+        # 2. Side-by-side comparison: Categories vs Clusters
+        print("\n📊 Creating side-by-side comparison: Real Categories vs VGG16 Clusters...")
+        comparison_fig = make_subplots(
+            rows=1, cols=2,
+            subplot_titles=[
+                '🏷️ Colored by Real Product Categories',
+                '🎯 Colored by VGG16 Clusters'
+            ],
+            horizontal_spacing=0.1
+        )
+        
+        # Left plot: Real categories
+        for i, category in enumerate(np.unique(vgg16_categories)):
+            mask = vgg16_categories == category
+            comparison_fig.add_trace(
+                go.Scatter(
+                    x=tsne_features[mask, 0],
+                    y=tsne_features[mask, 1],
+                    mode='markers',
+                    name=category,
+                    marker=dict(
+                        size=8,
+                        color=px.colors.qualitative.Set3[i % len(px.colors.qualitative.Set3)],
+                        line=dict(width=1, color='white')
+                    ),
+                    showlegend=True,
+                    legendgroup='categories'
+                ),
+                row=1, col=1
+            )
+        
+        # Right plot: Clusters
+        unique_clusters = np.unique(vgg16_cluster_labels)
+        cluster_colors = px.colors.qualitative.Dark2
+        
+        for i, cluster in enumerate(unique_clusters):
+            mask = vgg16_cluster_labels == cluster
+            comparison_fig.add_trace(
+                go.Scatter(
+                    x=tsne_features[mask, 0],
+                    y=tsne_features[mask, 1],
+                    mode='markers',
+                    name=f'Cluster {cluster}',
+                    marker=dict(
+                        size=8,
+                        color=cluster_colors[i % len(cluster_colors)],
+                        line=dict(width=1, color='white')
+                    ),
+                    showlegend=True,
+                    legendgroup='clusters'
+                ),
+                row=1, col=2
+            )
+        
+        comparison_fig.update_layout(
+            title='🔍 VGG16 Deep Features: t-SNE Analysis Comparison',
+            title_x=0.5,
+            width=1400,
+            height=600,
+            template='plotly_white',
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02
+            )
+        )
+        
+        comparison_fig.update_xaxes(title_text="t-SNE Component 1")
+        comparison_fig.update_yaxes(title_text="t-SNE Component 2")
+        
+        comparison_fig.add_annotation(
+            text=f"📈 VGG16 Performance: ARI = {vgg16_ari:.4f} • Silhouette = {clustering_results['silhouette_score']:.3f}<br>"
+                 f"💡 {'Good alignment' if vgg16_ari > 0.5 else 'Moderate alignment' if vgg16_ari > 0.2 else 'Poor alignment'} between clusters and true categories",
+            xref="paper", yref="paper",
+            x=0.5, y=-0.12, xanchor='center', yanchor='top',
+            showarrow=False, 
+            font=dict(size=12, color="gray"),
+            bgcolor="rgba(255,255,255,0.9)",
+            bordercolor="gray",
+            borderwidth=1
+        )
+        
+        print("🔍 VGG16 Side-by-Side Comparison:")
+        comparison_fig.show()
+        
+        # Print results summary
+        print(f"\n📈 VGG16 t-SNE Visualization Results:")
+        print(f"   🔍 Method: VGG16 Deep Features + t-SNE")
+        print(f"   📊 Data points: {len(tsne_features)}")
+        print(f"   🏷️ Categories: {len(np.unique(vgg16_categories))}")
+        print(f"   🎯 Clusters: {len(np.unique(vgg16_cluster_labels))}")
+        print(f"   📈 Category separation (ARI): {vgg16_ari:.4f}")
+        print(f"   🔗 Cluster quality (Silhouette): {clustering_results['silhouette_score']:.3f}")
+        
+        print(f"\n🔍 VGG16 Clustering Analysis:")
+        print(f"   📊 Real categories shown: {len(np.unique(vgg16_categories))}")
+        print(f"   🎯 VGG16 clusters found: {len(unique_clusters)}")
+        print(f"   📈 Agreement between categories and clusters: {vgg16_ari:.4f}")
+        print(f"   💡 Interpretation: {'Good alignment' if vgg16_ari > 0.5 else 'Moderate alignment' if vgg16_ari > 0.2 else 'Poor alignment'}")
+        
+        print(f"\n✅ VGG16 analysis and visualization completed!")
+        
+        # Return comprehensive results
+        return {
+            'ari_score': vgg16_ari,
+            'tsne_fig': vgg16_tsne_fig,
+            'comparison_fig': comparison_fig,
+            'clustering_results': clustering_results,
+            'categories': vgg16_categories,
+            'cluster_labels': vgg16_cluster_labels,
+            'tsne_data': vgg16_tsne_df,
+            'category_distribution': dict(zip(unique_cats, counts)),
+            'n_categories': len(np.unique(vgg16_categories)),
+            'n_clusters': len(unique_clusters),
+            'silhouette_score': clustering_results['silhouette_score']
+        }
