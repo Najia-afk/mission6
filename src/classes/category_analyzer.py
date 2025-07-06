@@ -462,7 +462,7 @@ class CategoryBasedAnalyzer:
                 'category_counts': dict(self.category_counts),
                 'total_categories': len(self.categories),
                 'total_samples': len(self.df),
-                'balanced_dataset': all(count >= 100 for count in self.category_counts.values()),
+                'balanced_dataset': all(count >= 100 for count in self.category_counts),
                 'recommendation': 'Use category-based analysis instead of random sampling for better insights'
             }
         
@@ -482,7 +482,7 @@ class CategoryBasedAnalyzer:
                 'total_categories': len(self.categories),
                 'total_samples': len(self.df),
                 'category_distribution': dict(self.category_counts),
-                'balanced_dataset': all(count >= 100 for count in self.category_counts.values())
+                'balanced_dataset': all(count >= 100 for count in dict(self.category_counts).values())
             },
             'feature_analysis': {
                 'categories_analyzed': len(self.category_stats),
