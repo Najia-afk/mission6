@@ -334,38 +334,45 @@ class TransferLearningClassifier:
     
     def create_augmented_model(self) -> tf.keras.Model:
         """
-        Create a model with data augmentation
+        Create a model with data augmentation and fine-tuning.
         
         Returns:
             Keras model
         """
-        print(f"🔧 Creating augmented model with {self.base_model_name}...")
+        print(f"🔧 Creating augmented model with {self.base_model_name} for fine-tuning...")
         
-        # Create base model first
+        # Create the base model structure first
         model = self.create_base_model()
         
-        # Make some layers of the base model trainable
-        base_model = model.layers[1]  # VGG16 or ResNet50 base
-        
-        # Unfreeze some top layers
+        # Find the actual base model layer within the full model by its name.
+        # This is robust and avoids the error. The default names are 'vgg16', 'resnet50', etc.
+        try:
+            base_model_layer = model.get_layer(self.base_model_name.lower())
+        except ValueError:
+            print(f"   ❌ Error: Could not find layer named '{self.base_model_name.lower()}' in the model. Aborting fine-tuning.")
+            return model
+
+        # Unfreeze some top layers of the base model for fine-tuning
         if self.base_model_name == 'VGG16':
-            # Unfreeze the top convolutional layers
-            for layer in base_model.layers[-4:]:
+            # Unfreeze the top convolutional layers (e.g., block5)
+            for layer in base_model_layer.layers[-4:]:
                 layer.trainable = True
         elif self.base_model_name == 'ResNet50':
             # Unfreeze the top convolutional layers
-            for layer in base_model.layers[-10:]:
+            for layer in base_model_layer.layers[-10:]:
                 layer.trainable = True
         
-        # Use a lower learning rate
+        # Re-compile the model with a lower learning rate for fine-tuning
         model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=1e-5),
             loss='categorical_crossentropy',
             metrics=['accuracy']
         )
         
+        print("   ✅ Model re-compiled for fine-tuning with a lower learning rate.")
         model.summary()
         return model
+    
     
     def train_model(self,
                    model_name: str,
