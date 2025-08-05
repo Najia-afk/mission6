@@ -34,7 +34,9 @@ class TransferLearningClassifier:
                  num_classes: Optional[int] = None,
                  base_model_name: str = 'VGG16',
                  weights: str = 'imagenet',
-                 use_gpu: bool = True):
+                 use_gpu: bool = True,
+                 random_state: int = 42,
+                 model_dir: str = 'models'):
         """
         Initialize the Transfer Learning Classifier
         
@@ -49,6 +51,8 @@ class TransferLearningClassifier:
         self.num_classes = num_classes
         self.base_model_name = base_model_name
         self.weights = weights
+        self.random_state = random_state
+        self.model_dir = model_dir
         
         # Set up GPU configuration
         gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -90,40 +94,34 @@ class TransferLearningClassifier:
                                    random_state: int = 42,
                                    image_dir: Optional[str] = None) -> Dict[str, Any]:
         """
-        Prepare data from a DataFrame containing image paths and categories
-        
-        Args:
-            df: DataFrame containing image paths and categories
-            image_column: Name of the column containing image filenames
-            category_column: Name of the column containing categories
-            test_size: Proportion of data to use for testing
-            val_size: Proportion of training data to use for validation
-            random_state: Random state for reproducibility
-            image_dir: Directory containing images (if paths in DataFrame are not absolute)
-            
-        Returns:
-            Dictionary with data summary
+        Prepare data from a DataFrame containing image paths and categories.
         """
         print("🔄 Preparing data from DataFrame...")
         
-        # Process image paths
-        if image_dir:
-            # If image_dir is provided, construct full paths
-            df = df.copy()
-            df['image_path'] = df[image_column].apply(lambda x: os.path.join(image_dir, x))
+        df = df.copy()
+
+        # --- Corrected Path Handling Logic ---
+        # Determine the directory to use for images.
+        final_image_dir = image_dir
+        if not final_image_dir:
+            # If no directory is passed, try a default location.
+            default_dir = 'dataset/Flipkart/Images'
+            if os.path.exists(default_dir):
+                final_image_dir = default_dir
+                print(f"   📁 Using default image directory: {final_image_dir}")
+
+        # If we have a directory, construct the full path safely.
+        if final_image_dir:
+            # Use os.path.basename to prevent creating a double path.
+            # This takes only the filename part of the input path.
+            df['image_path'] = df[image_column].apply(
+                lambda p: os.path.join(final_image_dir, os.path.basename(p))
+            )
         else:
-            # Try to find a sensible default directory
-            dataset_dir = 'dataset/Flipkart/Images'
-            if os.path.exists(dataset_dir):
-                print(f"   📁 Using default image directory: {dataset_dir}")
-                df = df.copy()
-                df['image_path'] = df[image_column].apply(lambda x: os.path.join(dataset_dir, x))
-            else:
-                # Use the provided column directly
-                df = df.copy()
-                df['image_path'] = df[image_column]
-                print("   ⚠️ No image directory provided. Using raw image paths from DataFrame.")
-        
+            # If no directory is found or provided, use the column as-is.
+            df['image_path'] = df[image_column]
+            print("   ⚠️ No image directory specified or found. Using raw paths from DataFrame.")
+
         # Encode categories
         self.label_encoder = LabelEncoder()
         df['label_encoded'] = self.label_encoder.fit_transform(df[category_column])
@@ -282,55 +280,62 @@ class TransferLearningClassifier:
         }
 
     def create_base_model(self) -> tf.keras.Model:
-        """
-        Create a base model with pre-trained weights
-        
-        Returns:
-            Keras model
-        """
-        print(f"🔧 Creating base model with {self.base_model_name}...")
-        
-        # Input layer with explicit shape
-        input_tensor = Input(shape=self.input_shape)
-        
-        # Create base model
-        if self.base_model_name == 'VGG16':
-            base_model = VGG16(
-                weights=self.weights,
-                include_top=False,
-                input_tensor=input_tensor
+            """
+            Create a base model with pre-trained weights.
+            This version ensures the base model is a distinct, named layer.
+            
+            Returns:
+                Keras model
+            """
+            print(f"🔧 Creating base model with {self.base_model_name}...")
+            
+            # --- Step 1: Instantiate the base model and give it a name ---
+            # Do NOT connect it to an input tensor here.
+            if self.base_model_name == 'VGG16':
+                base_model = VGG16(
+                    weights=self.weights,
+                    include_top=False,
+                    input_shape=self.input_shape,
+                    name=self.base_model_name.lower()  # CRITICAL: Name the layer 'vgg16'
+                )
+            elif self.base_model_name == 'ResNet50':
+                base_model = ResNet50(
+                    weights=self.weights,
+                    include_top=False,
+                    input_shape=self.input_shape,
+                    name=self.base_model_name.lower() # CRITICAL: Name the layer 'resnet50'
+                )
+            else:
+                raise ValueError(f"Unsupported base model: {self.base_model_name}")
+                
+            # Freeze the base model so we only train the top layers
+            base_model.trainable = False
+            
+            # --- Step 2: Build the new model using the base model as a layer ---
+            inputs = Input(shape=self.input_shape)
+            
+            # Call the base_model on the input tensor. It now acts like a single, big layer.
+            x = base_model(inputs, training=False) 
+            
+            # Add the custom classifier on top
+            x = GlobalAveragePooling2D()(x)
+            x = Dense(1024, activation='relu')(x)
+            x = Dropout(0.5)(x)
+            predictions = Dense(self.num_classes, activation='softmax')(x)
+            
+            # Create the final model
+            model = Model(inputs=inputs, outputs=predictions)
+            
+            # Compile the model
+            model.compile(
+                optimizer='adam',
+                loss='categorical_crossentropy',
+                metrics=['accuracy']
             )
-        elif self.base_model_name == 'ResNet50':
-            base_model = ResNet50(
-                weights=self.weights,
-                include_top=False,
-                input_tensor=input_tensor
-            )
-        else:
-            raise ValueError(f"Unsupported base model: {self.base_model_name}")
-        
-        # Freeze base model layers
-        for layer in base_model.layers:
-            layer.trainable = False
-        
-        # Add custom layers
-        x = GlobalAveragePooling2D()(base_model.output)
-        x = Dense(1024, activation='relu')(x)
-        x = Dropout(0.5)(x)
-        predictions = Dense(self.num_classes, activation='softmax')(x)
-        
-        # Create model
-        model = Model(inputs=base_model.input, outputs=predictions)
-        
-        # Compile model
-        model.compile(
-            optimizer='adam',
-            loss='categorical_crossentropy',
-            metrics=['accuracy']
-        )
-        
-        model.summary()
-        return model
+            
+            print("   ✅ Base model created and compiled.")
+            model.summary()
+            return model
     
     def create_augmented_model(self) -> tf.keras.Model:
         """
@@ -412,25 +417,15 @@ class TransferLearningClassifier:
             }
         
         # Create model directory if it doesn't exist
-        os.makedirs('models', exist_ok=True)
-        model_path = f"models/{model_name}_best.h5"
+        os.makedirs(self.model_dir, exist_ok=True)
+        model_path = os.path.join(self.model_dir, f"{model_name}_best.keras")
         
         # Define callbacks
         callbacks = [
-            ModelCheckpoint(
-                filepath=model_path,
-                monitor='val_accuracy',
-                mode='max',
-                save_best_only=True,
-                verbose=1
-            ),
-            EarlyStopping(
-                monitor='val_accuracy',
-                patience=patience,
-                mode='max',
-                verbose=1
-            )
+            EarlyStopping(monitor='val_loss', patience=patience, verbose=1),
+            ModelCheckpoint(filepath=model_path, monitor='val_accuracy', save_best_only=True, verbose=1)
         ]
+        
         
         # Start training
         start_time = time.time()
@@ -788,7 +783,7 @@ class TransferLearningClassifier:
     
     def get_summary(self) -> Dict[str, Any]:
         """
-        Get summary of classifier results
+        Get summary of classifier results, including the best model.
         
         Returns:
             Dictionary with summary information
@@ -808,7 +803,27 @@ class TransferLearningClassifier:
                     "training_time": result["training_time"]
                 }
                 for name, result in self.evaluation_results.items()
-            }
+            },
+            "best_model": None  # Initialize best_model as None
         }
+        
+        # Find the best model based on test accuracy
+        if self.evaluation_results:
+            # Find the model name with the highest accuracy
+            best_model_name = max(self.evaluation_results, key=lambda k: self.evaluation_results[k]['accuracy'])
+            best_model_stats = self.evaluation_results[best_model_name]
+            
+            # Get the peak validation accuracy from the training history for the best model
+            best_val_accuracy = 0
+            if best_model_name in self.histories and 'val_accuracy' in self.histories[best_model_name]:
+                best_val_accuracy = max(self.histories[best_model_name]['val_accuracy'])
+
+            summary["best_model"] = {
+                "name": best_model_name,
+                "test_accuracy": best_model_stats["accuracy"],
+                "test_loss": best_model_stats["loss"],
+                "val_accuracy": best_val_accuracy,
+                "training_time": best_model_stats["training_time"]
+            }
         
         return summary

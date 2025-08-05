@@ -2,6 +2,7 @@
 /dataset/*
 /src/cache/
 .cache/
+/models/*
 
 # Python
 __pycache__/
