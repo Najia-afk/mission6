@@ -18,11 +18,16 @@ from tensorflow.keras.callbacks import ModelCheckpoint, EarlyStopping
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import adjusted_rand_score
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from typing import Dict, Any, List, Tuple, Union, Optional
 import time
 import glob
+from PIL import Image, ImageEnhance, ImageFilter
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 
 class TransferLearningClassifier:
     """
@@ -279,63 +284,80 @@ class TransferLearningClassifier:
             "X_test_shape": self.X_test.shape if self.X_test.size > 0 else (0,),
         }
 
-    def create_base_model(self) -> tf.keras.Model:
-            """
-            Create a base model with pre-trained weights.
-            This version ensures the base model is a distinct, named layer.
-            
-            Returns:
-                Keras model
-            """
-            print(f"🔧 Creating base model with {self.base_model_name}...")
-            
-            # --- Step 1: Instantiate the base model and give it a name ---
-            # Do NOT connect it to an input tensor here.
-            if self.base_model_name == 'VGG16':
-                base_model = VGG16(
-                    weights=self.weights,
-                    include_top=False,
-                    input_shape=self.input_shape,
-                    name=self.base_model_name.lower()  # CRITICAL: Name the layer 'vgg16'
-                )
-            elif self.base_model_name == 'ResNet50':
-                base_model = ResNet50(
-                    weights=self.weights,
-                    include_top=False,
-                    input_shape=self.input_shape,
-                    name=self.base_model_name.lower() # CRITICAL: Name the layer 'resnet50'
-                )
-            else:
-                raise ValueError(f"Unsupported base model: {self.base_model_name}")
-                
-            # Freeze the base model so we only train the top layers
-            base_model.trainable = False
-            
-            # --- Step 2: Build the new model using the base model as a layer ---
-            inputs = Input(shape=self.input_shape)
-            
-            # Call the base_model on the input tensor. It now acts like a single, big layer.
-            x = base_model(inputs, training=False) 
-            
-            # Add the custom classifier on top
-            x = GlobalAveragePooling2D()(x)
-            x = Dense(1024, activation='relu')(x)
-            x = Dropout(0.5)(x)
-            predictions = Dense(self.num_classes, activation='softmax')(x)
-            
-            # Create the final model
-            model = Model(inputs=inputs, outputs=predictions)
-            
-            # Compile the model
-            model.compile(
-                optimizer='adam',
-                loss='categorical_crossentropy',
-                metrics=['accuracy']
+    def create_base_model(self, show_backbone_summary: bool = False) -> tf.keras.Model:
+        """
+        Create a base model with pre-trained weights.
+        Optionally display the backbone summary before attaching the head.
+        """
+        print(f"🔧 Creating base model with {self.base_model_name}...")
+        # Instantiate backbone
+        if self.base_model_name == 'VGG16':
+            base_model = VGG16(
+                weights=self.weights,
+                include_top=False,
+                input_shape=self.input_shape,
+                name=self.base_model_name.lower()
             )
+        elif self.base_model_name == 'ResNet50':
+            base_model = ResNet50(
+                weights=self.weights,
+                include_top=False,
+                input_shape=self.input_shape,
+                name=self.base_model_name.lower()
+            )
+        else:
+            raise ValueError(f"Unsupported base model: {self.base_model_name}")
+
+        # Freeze backbone
+        base_model.trainable = False
+
+        if show_backbone_summary:
+            print("=== Backbone Summary (Frozen) ===")
+            base_model.summary(line_length=120)
+
+        # Build head
+        inputs = Input(shape=self.input_shape)
+        x = base_model(inputs, training=False)
+        x = GlobalAveragePooling2D()(x)
+        x = Dense(1024, activation='relu')(x)
+        x = Dropout(0.5)(x)
+        predictions = Dense(self.num_classes, activation='softmax')(x)
+        model = Model(inputs=inputs, outputs=predictions)
+
+        model.compile(
+            optimizer='adam',
+            loss='categorical_crossentropy',
+            metrics=['accuracy']
+        )
+        print("   ✅ Base model created and compiled.")
+        model.summary()
+        return model
+
+    
+    def _calculate_ari_score(self, model: tf.keras.Model, X_test: np.ndarray, y_test: np.ndarray) -> float:
+        """
+        Calculate the Adjusted Rand Index for a given model's predictions.
+        
+        Args:
+            model: The trained Keras model.
+            X_test: The test data features.
+            y_test: The one-hot encoded true labels for the test data.
             
-            print("   ✅ Base model created and compiled.")
-            model.summary()
-            return model
+        Returns:
+            The ARI score as a float.
+        """
+        if X_test is None or y_test is None or X_test.size == 0:
+            return float('nan')
+            
+        # Get model predictions
+        y_pred = model.predict(X_test)
+        
+        # Convert predictions and true labels from one-hot to single class indices
+        y_pred_classes = np.argmax(y_pred, axis=1)
+        y_true_classes = np.argmax(y_test, axis=1)
+        
+        # Calculate and return ARI score
+        return adjusted_rand_score(y_true_classes, y_pred_classes)
     
     def create_augmented_model(self) -> tf.keras.Model:
         """
@@ -494,13 +516,15 @@ class TransferLearningClassifier:
         # Calculate training time
         training_time = time.time() - start_time
         
-        # Evaluate model if test data is available
+       # Evaluate model and calculate ARI if test data is available
         if self.X_test.size > 0:
             evaluation = model.evaluate(self.X_test, self.y_test, verbose=1)
+            ari_score = self._calculate_ari_score(model, self.X_test, self.y_test)
         else:
             print("   ⚠️ No test data available for evaluation")
             evaluation = [float('nan'), float('nan')]  # Loss, accuracy
-        
+            ari_score = float('nan')
+
         # Save model and history
         self.models[model_name] = model
         self.histories[model_name] = history.history
@@ -509,11 +533,13 @@ class TransferLearningClassifier:
         self.evaluation_results[model_name] = {
             'loss': evaluation[0],
             'accuracy': evaluation[1],
-            'training_time': training_time
+            'training_time': training_time,
+            'ari_score': ari_score 
         }
         
         print(f"✅ Training completed in {training_time:.2f}s")
         print(f"   📊 Test accuracy: {evaluation[1]:.4f}")
+        print(f"   📊 ARI Score: {ari_score:.4f}")
         
         return {
             'model': model,
@@ -729,6 +755,8 @@ class TransferLearningClassifier:
         
         return fig
     
+
+    
     def plot_confusion_matrix(self, model_name: str) -> go.Figure:
         """
         Plot confusion matrix for a model
@@ -775,7 +803,6 @@ class TransferLearningClassifier:
             title=f"Confusion Matrix - {model_name}",
             xaxis=dict(title='Predicted Label'),
             yaxis=dict(title='True Label'),
-            width=800,
             height=800
         )
         
@@ -827,3 +854,147 @@ class TransferLearningClassifier:
             }
         
         return summary
+    
+
+    def plot_prediction_examples(self,
+                                 model_name: str,
+                                 num_correct: int = 4,
+                                 num_incorrect: int = 4,
+                                 uniq_id: Optional[str] = None) -> go.Figure:
+        """
+        Show prediction examples.
+        If uniq_id provided: show only that sample (if in test set).
+        Else: random correct / incorrect samples.
+        """
+        print(f"🖼️ Visualizing prediction examples for model: {model_name}")
+        if model_name not in self.models:
+            print(f"   ❌ Model '{model_name}' not found.")
+            return go.Figure()
+
+        model = self.models[model_name]
+        y_pred = model.predict(self.X_test)
+        y_pred_classes = np.argmax(y_pred, axis=1)
+        y_true_classes = np.argmax(self.y_test, axis=1)
+
+        if uniq_id:
+            print(f"   🔍 Looking for uniq_id={uniq_id}")
+            target_indices = self.test_df.index[self.test_df['uniq_id'] == uniq_id].tolist()
+            if not target_indices:
+                print(f"   ❌ uniq_id '{uniq_id}' not found in test set.")
+                return go.Figure()
+            # Position within test_df (sequential integer position)
+            try:
+                pos = list(self.test_df.index).index(target_indices[0])
+            except ValueError:
+                print(f"   ❌ Could not map uniq_id '{uniq_id}' to position.")
+                return go.Figure()
+            all_indices = np.array([pos])
+            plot_title = f"Prediction for uniq_id: {uniq_id}"
+        else:
+            correct_indices = np.where(y_pred_classes == y_true_classes)[0]
+            incorrect_indices = np.where(y_pred_classes != y_true_classes)[0]
+            sel_correct = np.random.choice(correct_indices,
+                                           min(num_correct, len(correct_indices)),
+                                           replace=False) if len(correct_indices) else []
+            sel_incorrect = np.random.choice(incorrect_indices,
+                                             min(num_incorrect, len(incorrect_indices)),
+                                             replace=False) if len(incorrect_indices) else []
+            all_indices = np.concatenate([sel_correct, sel_incorrect])
+            plot_title = "Model Prediction Analysis (Correct vs Incorrect)"
+
+        if len(all_indices) == 0:
+            print("   ⚠️ No examples to display.")
+            return go.Figure()
+
+        num_plots = len(all_indices)
+        # Layout: up to 4 per row
+        cols = 4 if num_plots > 2 else num_plots
+        cols = max(1, cols)
+        rows = (num_plots + cols - 1) // cols
+        fig = make_subplots(rows=rows, cols=cols)
+
+        original_images = []
+        for idx in all_indices:
+            img_path = self.test_df.iloc[idx]['image_path']
+            original_images.append(Image.open(img_path).resize((224, 224)))
+
+        def visualize_preprocess(img):
+            arr = img_to_array(img)
+            arr = np.expand_dims(arr, axis=0)
+            arr = vgg16_preprocess(arr)
+            arr = arr[0]
+            arr = (arr - arr.min()) / (arr.max() - arr.min() + 1e-8) * 255
+            return Image.fromarray(arr.astype('uint8'))
+
+        # Add traces + annotations
+        for i, (test_idx, pil_img) in enumerate(zip(all_indices, original_images)):
+            row = (i // cols) + 1
+            col = (i % cols) + 1
+            fig.add_trace(go.Image(z=np.array(pil_img)), row=row, col=col)
+            true_label = self.class_names[y_true_classes[test_idx]]
+            pred_label = self.class_names[y_pred_classes[test_idx]]
+            title_color = "green" if true_label == pred_label else "red"
+            axis_num = i + 1
+            if axis_num == 1:
+                xref = "x domain"; yref = "y domain"
+            else:
+                xref = f"x{axis_num} domain"; yref = f"y{axis_num} domain"
+            fig.add_annotation(
+                text=f"<b>True:</b> {true_label}<br><b>Pred:</b> {pred_label}",
+                font=dict(color=title_color, size=12),
+                x=0.5, y=1.05,
+                xref=xref, yref=yref,
+                showarrow=False
+            )
+
+        # Precompute all transformations as numpy arrays
+        original_arrays = [np.array(im) for im in original_images]
+
+        contrast_arrays = [np.array(ImageEnhance.Contrast(im).enhance(2.0)) for im in original_images]
+
+        grayscale_arrays = [np.array(im.convert("L")) for im in original_images]
+
+        blur_arrays = [np.array(im.filter(ImageFilter.GaussianBlur(radius=2))) for im in original_images]
+
+        vgg_arrays = []
+        for im in original_images:
+            arr = img_to_array(im)
+            arr_batch = np.expand_dims(arr.copy(), axis=0)
+            arr_batch = vgg16_preprocess(arr_batch)
+            arr_v = arr_batch[0]
+            arr_v = (arr_v - arr_v.min()) / (arr_v.max() - arr_v.min() + 1e-8) * 255
+            vgg_arrays.append(arr_v.astype('uint8'))
+
+        trace_indices = list(range(num_plots))
+
+        buttons = [
+            dict(label="Original",
+                 method="restyle",
+                 args=[{"z": original_arrays}, trace_indices]),
+            dict(label="High Contrast",
+                 method="restyle",
+                 args=[{"z": contrast_arrays}, trace_indices]),
+            dict(label="Grayscale",
+                 method="restyle",
+                 args=[{"z": grayscale_arrays}, trace_indices]),
+            dict(label="Blur",
+                 method="restyle",
+                 args=[{"z": blur_arrays}, trace_indices]),
+            dict(label="VGG16 Input",
+                 method="restyle",
+                 args=[{"z": vgg_arrays}, trace_indices]),
+        ]
+
+        fig.update_layout(
+            updatemenus=[dict(type="buttons",
+                              direction="right",
+                              x=0.5, xanchor="center",
+                              y=1.18, yanchor="top",
+                              buttons=buttons)],
+            title_text=plot_title,
+            height=280 * rows + 120,
+            width=260 * cols,
+            margin=dict(t=140)
+        )
+        fig.update_xaxes(showticklabels=False).update_yaxes(showticklabels=False)
+        return fig
