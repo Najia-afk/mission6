@@ -24,9 +24,98 @@ from plotly.subplots import make_subplots
 from typing import Dict, Any, List, Tuple, Union, Optional
 import time
 import glob
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tqdm.notebook import tqdm
+
+
+class TQDMProgressBar(tf.keras.callbacks.Callback):
+    def __init__(self):
+        super().__init__()
+        self.epochs_pbar = None
+        self.batch_pbar = None
+        self.epoch_start_time = None
+        self.last_batch_start = None
+        self.batch_times = []
+        self.steps_in_epoch = 0
+
+    def on_train_begin(self, logs=None):
+        total_epochs = self.params.get('epochs', 0)
+        if total_epochs:
+            self.epochs_pbar = tqdm(total=total_epochs, desc="Training epochs", unit="epoch")
+
+    def _compute_steps(self):
+        steps = self.params.get('steps', None)
+        if steps is None:
+            samples = self.params.get('samples', 0)
+            batch_size = self.params.get('batch_size', 32)
+            steps = int(np.ceil(samples / max(1, batch_size))) if samples else 0
+        return steps or 0
+
+    def on_epoch_begin(self, epoch, logs=None):
+        self.steps_in_epoch = self._compute_steps()
+        self.batch_times = []
+        self.epoch_start_time = time.time()
+        if self.steps_in_epoch:
+            self.batch_pbar = tqdm(
+                total=self.steps_in_epoch,
+                desc=f"Epoch {epoch + 1}/{self.params.get('epochs', '?')}",
+                unit="batch",
+                leave=False
+            )
+
+    def on_train_batch_begin(self, batch, logs=None):
+        self.last_batch_start = time.time()
+
+    def on_train_batch_end(self, batch, logs=None):
+        if self.batch_pbar is not None:
+            self.batch_pbar.update(1)
+        if self.last_batch_start is not None:
+            self.batch_times.append(time.time() - self.last_batch_start)
+
+    def on_epoch_end(self, epoch, logs=None):
+        # Close batch bar
+        if self.batch_pbar is not None:
+            self.batch_pbar.close()
+            self.batch_pbar = None
+
+        # Update epoch bar
+        if self.epochs_pbar is not None:
+            self.epochs_pbar.update(1)
+
+        # Compose single compact summary line that mimics Keras' last-batch line
+        logs = logs or {}
+        acc = logs.get('accuracy', None)
+        loss = logs.get('loss', None)
+        val_acc = logs.get('val_accuracy', None)
+        val_loss = logs.get('val_loss', None)
+
+        epoch_secs = time.time() - (self.epoch_start_time or time.time())
+        avg_ms_per_step = (np.mean(self.batch_times) * 1000.0) if self.batch_times else 0.0
+
+        steps_txt = f"{self.steps_in_epoch}/{self.steps_in_epoch}" if self.steps_in_epoch else ""
+        bar_txt = "━━━━━━━━━━━━━━━━━━━━"  # decorative bar
+        time_txt = f"{int(epoch_secs)}s {int(avg_ms_per_step)}ms/step"
+
+        metrics_parts = []
+        if acc is not None:
+            metrics_parts.append(f"accuracy: {acc:.4f}")
+        if loss is not None:
+            metrics_parts.append(f"loss: {loss:.4f}")
+        if val_acc is not None:
+            metrics_parts.append(f"val_accuracy: {val_acc:.4f}")
+        if val_loss is not None:
+            metrics_parts.append(f"val_loss: {val_loss:.4f}")
+
+        line = f"{steps_txt} {bar_txt} {time_txt} - " + " - ".join(metrics_parts)
+        # Print cleanly without breaking tqdm bars
+        tqdm.write(line)
+
+    def on_train_end(self, logs=None):
+        if self.epochs_pbar is not None:
+            self.epochs_pbar.close()
+            self.epochs_pbar = None
 
 
 class TransferLearningClassifier:
@@ -186,7 +275,7 @@ class TransferLearningClassifier:
         print(f"   🖼️ Loading {len(df)} images...")
         failed_count = 0
         
-        for _, row in df.iterrows():
+        for _, row in tqdm(df.iterrows(), total=len(df), desc="Loading & preprocessing", unit="img"):
             try:
                 image_path = row[image_column]
                 
@@ -238,7 +327,7 @@ class TransferLearningClassifier:
             synthetic_labels = []
             
             # Create synthetic data with the right shape
-            for i in range(min(100, len(df))):
+            for i in tqdm(range(min(100, len(df))), desc="Synthetic data", unit="img"):
                 # Create a synthetic image with the right shape, filled with random data
                 synthetic_img = np.random.rand(*self.input_shape) * 2.0 - 1.0  # Range [-1, 1] for VGG16
                 synthetic_images.append(synthetic_img)
@@ -445,7 +534,8 @@ class TransferLearningClassifier:
         # Define callbacks
         callbacks = [
             EarlyStopping(monitor='val_loss', patience=patience, verbose=1),
-            ModelCheckpoint(filepath=model_path, monitor='val_accuracy', save_best_only=True, verbose=1)
+            ModelCheckpoint(filepath=model_path, monitor='val_accuracy', save_best_only=True, verbose=1),
+            TQDMProgressBar()
         ]
         
         
@@ -484,7 +574,7 @@ class TransferLearningClassifier:
                     validation_data=val_generator,
                     epochs=epochs,
                     callbacks=callbacks,
-                    verbose=1
+                    verbose=0  # suppress Keras batch logs; we print a compact epoch-end line instead
                 )
             else:
                 # Train without generators
@@ -494,7 +584,7 @@ class TransferLearningClassifier:
                     epochs=epochs,
                     batch_size=batch_size,
                     callbacks=callbacks,
-                    verbose=1
+                    verbose=0  # suppress Keras batch logs; we print a compact epoch-end line instead
                 )
                 
             # Load best weights
@@ -952,7 +1042,7 @@ class TransferLearningClassifier:
 
         contrast_arrays = [np.array(ImageEnhance.Contrast(im).enhance(2.0)) for im in original_images]
 
-        grayscale_arrays = [np.array(im.convert("L")) for im in original_images]
+        grayscale_arrays = [np.array(ImageOps.grayscale(im).convert("RGB")) for im in original_images]
 
         blur_arrays = [np.array(im.filter(ImageFilter.GaussianBlur(radius=2))) for im in original_images]
 
