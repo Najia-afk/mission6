@@ -159,7 +159,8 @@ def _build_figures_from_results(
         # Reduce to 2D for plotting
         X = PCA(n_components=2, random_state=0).fit_transform(combined_features) if combined_features.shape[1] > 1 else np.c_[combined_features, np.zeros((n, 1))]
         figs['feature_viz'] = go.Figure([
-            go.Scattergl(
+            # Replaced Scattergl with Scatter for better compatibility
+            go.Scatter(
                 x=X[:, 0], y=X[:, 1], mode='markers',
                 marker=dict(size=6, opacity=0.85),
                 text=image_names,
@@ -340,6 +341,23 @@ def run_plotting_pipeline(
       normalized_images, category_feature_matrix, category_feature_names, category_names,
       df_magnitudes, feature_results, combined_features, combined_feature_names, figures
     """
+    # Filter df to only rows whose image exists in processed_images
+    _, by_image = _build_image_lookup(df, processed_images, id_column, image_column)
+    if by_image:
+        df = df[df[image_column].apply(lambda v: _basename(v) in by_image)].copy()
+    if df.empty or (category_column not in df.columns):
+        return {
+            'normalized_images': {},
+            'category_feature_matrix': np.empty((0, 0)),
+            'category_feature_names': [],
+            'category_names': [],
+            'df_magnitudes': pd.DataFrame(),
+            'feature_results': {},
+            'combined_features': None,
+            'combined_feature_names': [],
+            'figures': {'feature_viz': go.Figure().update_layout(title='No images/categories available')}
+        }
+
     # Category-level normalization and averages
     normalized_images = normalize_images_by_category(
         df, processed_images, feature_extractor,
@@ -387,21 +405,21 @@ def run_plotting_pipeline(
 
 
 def extract_and_visualize_basic_features(
-    df: pd.DataFrame,
-    processed_images: Any,
-    num_images_per_category: int = 15,
-    random_seed: int = 42,
-    id_column: str = 'uniq_id',
-    image_column: str = 'image',
-    category_column: str = 'product_category',
-) -> Tuple[
-    Dict[str, Dict[str, Optional[np.ndarray]]],
-    Dict[str, Any],
-    Optional[np.ndarray],
-    List[str],
-    pd.DataFrame,
-    Dict[str, go.Figure]
-]:
+        df: pd.DataFrame,
+        processed_images: Any,
+        num_images_per_category: int = 15,
+        random_seed: int = 42,
+        id_column: str = 'uniq_id',
+        image_column: str = 'image',
+        category_column: str = 'product_category',
+    ) -> Tuple[
+        Dict[str, Dict[str, Optional[np.ndarray]]],
+        Dict[str, Any],
+        Optional[np.ndarray],
+        List[str],
+        pd.DataFrame,
+        Dict[str, go.Figure]
+    ]:
     """
     Notebook-friendly wrapper:
     - Instantiates a BasicImageFeatureExtractor (v2) with safe defaults.
@@ -416,24 +434,51 @@ def extract_and_visualize_basic_features(
             sift_features=128, lbp_radius=1, lbp_points=8, patch_size=(16, 16), max_patches=25
         )
 
-    out = run_plotting_pipeline(
-        df=df,
-        processed_images=processed_images,
-        feature_extractor=feature_extractor,
-        num_images_per_category=num_images_per_category,
-        random_seed=random_seed,
-        id_column=id_column,
-        image_column=image_column,
-        category_column=category_column,
-        include_category_col_in_magnitudes=True,
-    )
+    try:
+        out = run_plotting_pipeline(
+            df=df,
+            processed_images=processed_images,
+            feature_extractor=feature_extractor,
+            num_images_per_category=num_images_per_category,
+            random_seed=random_seed,
+            id_column=id_column,
+            image_column=image_column,
+            category_column=category_column,
+            include_category_col_in_magnitudes=True,
+        ) or {}
+    except Exception as e:
+        out = {
+            "normalized_images": {},
+            "feature_results": {},
+            "combined_features": None,
+            "combined_feature_names": [],
+            "df_magnitudes": pd.DataFrame(),
+            "figures": {"feature_viz": go.Figure().update_layout(title=f"Feature visualization unavailable: {e}")}
+        }
 
-    normalized_images = out['normalized_images']
-    feature_results = out['feature_results']
-    combined_features = out['combined_features']
-    feature_names = out['combined_feature_names'] or []
-    df_magnitudes = out['df_magnitudes']
-    figs = out['figures']
+    normalized_images = out.get('normalized_images', {})
+    feature_results = out.get('feature_results', {})
+    combined_features = out.get('combined_features', None)
+    feature_names = out.get('combined_feature_names') or []
+    df_magnitudes = out.get('df_magnitudes', pd.DataFrame())
+    figs = out.get('figures', {}) or {}
+
+    # Ensure a usable feature_viz figure exists
+    if 'feature_viz' not in figs:
+        if isinstance(combined_features, np.ndarray) and combined_features.ndim == 2 and combined_features.shape[0] > 0:
+            if combined_features.shape[1] > 1 and combined_features.shape[0] > 1:
+                X2 = PCA(n_components=min(2, combined_features.shape[1]), random_state=0).fit_transform(combined_features)
+                figs['feature_viz'] = go.Figure([
+                    go.Scatter(x=X2[:, 0], y=X2[:, 1], mode='markers',
+                               marker=dict(size=6, opacity=0.85))
+                ]).update_layout(title='PCA of Combined Image Features', xaxis_title='PC1', yaxis_title='PC2')
+            else:
+                y = combined_features[:, 0] if combined_features.ndim == 2 else combined_features
+                figs['feature_viz'] = go.Figure([
+                    go.Scatter(y=y, mode='markers', marker=dict(size=6, opacity=0.85))
+                ]).update_layout(title='Combined Features (1D)', xaxis_title='Index', yaxis_title='Value')
+        else:
+            figs['feature_viz'] = go.Figure().update_layout(title='No features available')
 
     return normalized_images, feature_results, combined_features, feature_names, df_magnitudes, figs
 
@@ -536,8 +581,8 @@ def quick_sample_feature_extraction(
             n = X.shape[0]
             X2 = PCA(n_components=2, random_state=0).fit_transform(X) if X.shape[1] > 1 else np.c_[X, np.zeros((n, 1))]
             fig = go.Figure([
-                go.Scattergl(x=X2[:, 0], y=X2[:, 1], mode='markers', text=names,
-                             hovertemplate='Name: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}')
+                go.Scatter(x=X2[:, 0], y=X2[:, 1], mode='markers', text=names,
+                           hovertemplate='Name: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}')
             ]).update_layout(title='PCA of Combined Image Features (Sample)', showlegend=False)
         else:
             fig = go.Figure().update_layout(title='No combined features', showlegend=False )
@@ -560,4 +605,189 @@ def quick_sample_feature_extraction(
         'feature_results': extractor.feature_results,
         'combined_features': combined_features,
         'feature_names': feature_names,
+    }
+
+
+def quick_category_sample_feature_extraction(
+    df: pd.DataFrame,
+    processed_images: Any,
+    n_per_category: int = 15,
+    random_state: int = 42,
+    id_column: str = 'uniq_id',
+    image_column: str = 'image',
+    category_column: str = 'product_category',
+) -> Dict[str, Any]:
+    """
+    Fast extraction using up to n_per_category images per category.
+    Returns: dict with 'summary', 'feature_viz', 'radar', 'heatmap', 'stacked_bar',
+             'feature_results', 'combined_features', 'feature_names', 'df_magnitudes'.
+    """
+    rng = np.random.default_rng(random_state)
+
+    # Build lookup of available arrays
+    _, by_image = _build_image_lookup(df, processed_images, id_column, image_column)
+    if not by_image or (category_column not in df.columns):
+        return {
+            'summary': {'images_processed': 0, 'feature_matrix_shape': (0, 0), 'total_features': 0, 'feature_types': []},
+            'feature_viz': go.Figure().update_layout(title='No images/categories available'),
+            'radar': go.Figure().update_layout(title='No radar (no data)'),
+            'heatmap': go.Figure().update_layout(title='No heatmap (no data)'),
+            'stacked_bar': go.Figure().update_layout(title='No stacked bar (no data)'),
+            'feature_results': {},
+            'combined_features': None,
+            'feature_names': [],
+            'df_magnitudes': pd.DataFrame(),
+        }
+
+    # Filter df to processed images
+    df2 = df[df[image_column].apply(lambda v: _basename(v) in by_image)].copy()
+    if df2.empty:
+        return {
+            'summary': {'images_processed': 0, 'feature_matrix_shape': (0, 0), 'total_features': 0, 'feature_types': []},
+            'feature_viz': go.Figure().update_layout(title='No matched images'),
+            'radar': go.Figure().update_layout(title='No radar (no matched images)'),
+            'heatmap': go.Figure().update_layout(title='No heatmap (no matched images)'),
+            'stacked_bar': go.Figure().update_layout(title='No stacked bar (no matched images)'),
+            'feature_results': {},
+            'combined_features': None,
+            'feature_names': [],
+            'df_magnitudes': pd.DataFrame(),
+        }
+
+    # Sample up to n_per_category per category
+    arrays: List[np.ndarray] = []
+    names: List[str] = []
+    cats: List[str] = []
+    for cat, grp in df2.groupby(category_column):
+        imgs = [_basename(x) for x in grp[image_column].dropna().tolist()]
+        imgs = [nm for nm in imgs if nm in by_image]
+        if not imgs:
+            continue
+        k = min(n_per_category, len(imgs))
+        sel = list(rng.choice(len(imgs), size=k, replace=False))
+        for idx in sel:
+            nm = imgs[idx]
+            arr = by_image[nm]
+            if isinstance(arr, np.ndarray):
+                arrays.append(arr)
+                names.append(nm)
+                cats.append(str(cat))
+
+    if not arrays:
+        return {
+            'summary': {'images_processed': 0, 'feature_matrix_shape': (0, 0), 'total_features': 0, 'feature_types': []},
+            'feature_viz': go.Figure().update_layout(title='No arrays after sampling'),
+            'radar': go.Figure().update_layout(title='No radar (no arrays)'),
+            'heatmap': go.Figure().update_layout(title='No heatmap (no arrays)'),
+            'stacked_bar': go.Figure().update_layout(title='No stacked bar (no arrays)'),
+            'feature_results': {},
+            'combined_features': None,
+            'feature_names': [],
+            'df_magnitudes': pd.DataFrame(),
+        }
+
+    # Instantiate extractor
+    try:
+        extractor = BasicImageFeatureExtractor()
+    except TypeError:
+        extractor = BasicImageFeatureExtractor(
+            sift_features=128, lbp_radius=1, lbp_points=8, patch_size=(16, 16), max_patches=25
+        )
+
+    # Extract features once
+    extractor.extract_features_batch(arrays, image_names=names)
+    combined_features, feature_names = extractor.combine_features()
+    fr = extractor.feature_results
+
+    # PCA scatter colored by category
+    if isinstance(combined_features, np.ndarray) and combined_features.size > 0:
+        X = combined_features
+        n = X.shape[0]
+        X2 = PCA(n_components=2, random_state=0).fit_transform(X) if X.shape[1] > 1 else np.c_[X, np.zeros((n, 1))]
+        feature_viz = go.Figure([
+            go.Scatter(
+                x=X2[:, 0], y=X2[:, 1], mode='markers',
+                marker=dict(size=6, opacity=0.85),
+                text=names,
+                customdata=np.array(cats, dtype=object),
+                hovertemplate='Name: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<br>Category: %{customdata}',
+            )
+        ]).update_layout(
+            title='PCA of Combined Image Features (Category-sampled)', xaxis_title='PC1', yaxis_title='PC2'
+        )
+    else:
+        feature_viz = go.Figure().update_layout(title='No combined features')
+
+    # Build per-category magnitudes (L2 per feature type)
+    feat_types = [k for k in ['sift_features', 'lbp_features', 'glcm_features', 'gabor_features', 'patch_features'] if k in fr and len(fr[k]) > 0]
+    if feat_types:
+        per_img_norms = {}
+        for k in feat_types:
+            A = np.array(fr[k])
+            per_img_norms[k] = np.linalg.norm(A, axis=1) if A.ndim == 2 else np.asarray(A, dtype=float)
+
+        df_norms = pd.DataFrame({'category': cats, **{k.replace('_features', ''): v for k, v in per_img_norms.items()}})
+        df_magnitudes = df_norms.groupby('category', as_index=False).mean()
+
+        # Heatmap
+        feat_cols = [c for c in ['sift', 'lbp', 'glcm', 'gabor', 'patch'] if c in df_magnitudes.columns]
+        heatmap = go.Figure([go.Heatmap(
+            z=df_magnitudes[feat_cols].values,
+            x=feat_cols,
+            y=df_magnitudes['category'].tolist(),
+            colorscale='Viridis'
+        )]).update_layout(
+            title='Feature Magnitude by Category (L2 norm)', xaxis_title='Feature Type', yaxis_title='Category'
+        )
+
+        # Radar (normalize per feature to [0,1])
+        vals = df_magnitudes[feat_cols].replace(0, np.nan)
+        vals = vals.divide(vals.max(axis=0), axis=1).fillna(0.0)
+        radar = go.Figure()
+        for i, row in vals.iterrows():
+            radar.add_trace(go.Scatterpolar(
+                r=row.values.tolist(),
+                theta=feat_cols,
+                fill='toself',
+                name=str(df_magnitudes.loc[i, 'category'])
+            ))
+        radar.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            title="Feature Profile by Category (Normalized)"
+        )
+        # Stacked bar
+        bar = go.Figure()
+        for _, r in df_magnitudes.iterrows():
+            bar.add_trace(go.Bar(x=feat_cols, y=[r[c] for c in feat_cols], name=str(r['category'])))
+        bar.update_layout(
+            barmode='stack',
+            title='Category Contribution to Each Feature Type',
+            xaxis_title='Feature Type',
+            yaxis_title='Total Feature Activation (L2)'
+        )
+    else:
+        df_magnitudes = pd.DataFrame()
+        heatmap = go.Figure().update_layout(title='No magnitudes (no features)')
+        radar = go.Figure().update_layout(title='No radar (no features)')
+        bar = go.Figure().update_layout(title='No stacked bar (no features)')
+
+    total_features = int(combined_features.shape[1]) if isinstance(combined_features, np.ndarray) and combined_features.ndim == 2 else 0
+    feature_type_keys = [k for k in fr.keys() if k.endswith('_features') and len(fr[k]) > 0]
+    summary = {
+        'images_processed': len(names),
+        'feature_matrix_shape': (len(names), total_features),
+        'total_features': total_features,
+        'feature_types': [k.replace('_features', '').upper() for k in feature_type_keys],
+    }
+    return {
+        'summary': summary,
+        'feature_viz': feature_viz,
+        'radar': radar,
+        'heatmap': heatmap,
+        'stacked_bar': bar,
+        'feature_results': fr,
+        'combined_features': combined_features,
+        'feature_names': feature_names,
+        'df_magnitudes': df_magnitudes,
     }
