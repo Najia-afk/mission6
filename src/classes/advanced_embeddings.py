@@ -9,6 +9,11 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from sklearn.preprocessing import normalize
 from typing import List, Dict, Any, Union, Optional
+from urllib.error import URLError
+import ssl
+import shutil
+import tempfile
+import os
 
 class AdvancedTextEmbeddings:
     """Class for generating advanced text embeddings using Word2Vec, BERT, and Universal Sentence Encoder"""
@@ -152,8 +157,6 @@ class AdvancedTextEmbeddings:
         """
         Generate embeddings using Universal Sentence Encoder
         """
-        import os
-        import ssl
         import certifi
         
         # Convert Series to list if needed
@@ -173,17 +176,30 @@ class AdvancedTextEmbeddings:
         os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
         os.environ['SSL_CERT_FILE'] = certifi.where()
         
-        # Option 2: Create a custom SSL context if needed
+        model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
         try:
-            # Load pre-trained USE model
-            model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
             self.use_model = hub.load(model_url)
+        except ValueError as e:
+            # Handle corrupted/incomplete TF-Hub cache
+            if ("incompatible/unknown type" in str(e)
+                or "contains neither 'saved_model.pb'" in str(e)):
+                print("   ⚠️ TF-Hub cache appears corrupted. Resetting cache and retrying...")
+                fresh_cache = os.path.join(tempfile.gettempdir(), "tfhub_cache_mission6")
+                # Reset to a clean cache dir for this retry
+                try:
+                    shutil.rmtree(fresh_cache)
+                except Exception:
+                    pass
+                os.makedirs(fresh_cache, exist_ok=True)
+                os.environ["TFHUB_CACHE_DIR"] = fresh_cache
+                self.use_model = hub.load(model_url)
+            else:
+                raise
         except URLError as e:
+            # Handle SSL issues (e.g., CERTIFICATE_VERIFY_FAILED)
             if "CERTIFICATE_VERIFY_FAILED" in str(e):
-                print("SSL certificate verification failed. Creating custom SSL context...")
-                # Create an unverified context (less secure, but works for testing)
+                print("   ⚠️ SSL verification failed. Retrying with unverified SSL context...")
                 ssl._create_default_https_context = ssl._create_unverified_context
-                # Try again with the unverified context
                 self.use_model = hub.load(model_url)
             else:
                 raise

@@ -439,7 +439,7 @@ class TransferLearningClassifier:
             return float('nan')
             
         # Get model predictions
-        y_pred = model.predict(X_test)
+        y_pred = model.predict(X_test, verbose=0)
         
         # Convert predictions and true labels from one-hot to single class indices
         y_pred_classes = np.argmax(y_pred, axis=1)
@@ -608,7 +608,7 @@ class TransferLearningClassifier:
         
        # Evaluate model and calculate ARI if test data is available
         if self.X_test.size > 0:
-            evaluation = model.evaluate(self.X_test, self.y_test, verbose=1)
+            evaluation = model.evaluate(self.X_test, self.y_test, verbose=0)
             ari_score = self._calculate_ari_score(model, self.X_test, self.y_test)
         else:
             print("   ⚠️ No test data available for evaluation")
@@ -865,7 +865,7 @@ class TransferLearningClassifier:
         
         # Get model and predictions
         model = self.models[model_name]
-        y_pred = model.predict(self.X_test)
+        y_pred = model.predict(self.X_test, verbose=0)
         y_pred_classes = np.argmax(y_pred, axis=1)
         y_true_classes = np.argmax(self.y_test, axis=1)
         
@@ -957,12 +957,12 @@ class TransferLearningClassifier:
         Else: random correct / incorrect samples.
         """
         print(f"🖼️ Visualizing prediction examples for model: {model_name}")
-        if model_name not in self.models:
+        if (model_name not in self.models):
             print(f"   ❌ Model '{model_name}' not found.")
             return go.Figure()
 
         model = self.models[model_name]
-        y_pred = model.predict(self.X_test)
+        y_pred = model.predict(self.X_test, verbose=0)
         y_pred_classes = np.argmax(y_pred, axis=1)
         y_true_classes = np.argmax(self.y_test, axis=1)
 
