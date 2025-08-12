@@ -458,7 +458,7 @@ class ImageProcessor:
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
-                'Processing Success Rate',
+                '',
                 'Image Quality Distribution',
                 'Feature Extraction Summary',
                 'Processing Statistics'

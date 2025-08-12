@@ -1024,17 +1024,25 @@ class TransferLearningClassifier:
             true_label = self.class_names[y_true_classes[test_idx]]
             pred_label = self.class_names[y_pred_classes[test_idx]]
             title_color = "green" if true_label == pred_label else "red"
+
+            # Compute the center/top of the subplot in paper coords
             axis_num = i + 1
-            if axis_num == 1:
-                xref = "x domain"; yref = "y domain"
-            else:
-                xref = f"x{axis_num} domain"; yref = f"y{axis_num} domain"
+            suffix = "" if axis_num == 1 else str(axis_num)
+            xaxis = getattr(fig.layout, f"xaxis{suffix}")
+            yaxis = getattr(fig.layout, f"yaxis{suffix}")
+            xmid = (xaxis.domain[0] + xaxis.domain[1]) / 2.0
+            ytop = min(0.98, yaxis.domain[1] + 0.03)  # a bit above the image, but inside the figure
+
             fig.add_annotation(
                 text=f"<b>True:</b> {true_label}<br><b>Pred:</b> {pred_label}",
                 font=dict(color=title_color, size=12),
-                x=0.5, y=1.05,
-                xref=xref, yref=yref,
-                showarrow=False
+                x=xmid, y=ytop,
+                xref="paper", yref="paper",
+                showarrow=False,
+                align="center",
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="rgba(0,0,0,0.15)",
+                borderwidth=1
             )
 
         # Precompute all transformations as numpy arrays
@@ -1079,7 +1087,7 @@ class TransferLearningClassifier:
             updatemenus=[dict(type="buttons",
                               direction="right",
                               x=0.5, xanchor="center",
-                              y=1.18, yanchor="top",
+                              y=1.1, yanchor="top",
                               buttons=buttons)],
             title_text=plot_title,
             height=280 * rows + 120,

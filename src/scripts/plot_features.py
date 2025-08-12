@@ -528,6 +528,8 @@ def quick_sample_feature_extraction(
     # Try extractor-provided viz; otherwise PCA fallback
     if hasattr(extractor, 'create_feature_visualization'):
         fig = extractor.create_feature_visualization()
+        # Always hide legend
+        fig.update_layout(showlegend=False)
     else:
         if isinstance(combined_features, np.ndarray) and combined_features.size > 0:
             X = combined_features
@@ -536,9 +538,9 @@ def quick_sample_feature_extraction(
             fig = go.Figure([
                 go.Scattergl(x=X2[:, 0], y=X2[:, 1], mode='markers', text=names,
                              hovertemplate='Name: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}')
-            ]).update_layout(title='PCA of Combined Image Features (Sample)')
+            ]).update_layout(title='PCA of Combined Image Features (Sample)', showlegend=False)
         else:
-            fig = go.Figure().update_layout(title='No combined features')
+            fig = go.Figure().update_layout(title='No combined features', showlegend=False )
 
     # Summary
     total_features = int(combined_features.shape[1]) if isinstance(combined_features, np.ndarray) and combined_features.ndim == 2 else 0
