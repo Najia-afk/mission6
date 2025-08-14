@@ -162,177 +162,290 @@ def _combine_feature_dict(
     return X, feature_names, image_ids, col_types
 
 
+
 def extract_and_visualize_basic_features(
     df: pd.DataFrame,
-    processed_images: Dict[str, Any],
+    processed_images: Any,
     num_images_per_category: int = 15,
     random_seed: int = 42,
     id_column: str = "uniq_id",
     image_column: str = "image",
     category_column: str = "product_category",
-) -> Tuple[List[str], Dict[str, Any], np.ndarray, List[str], pd.DataFrame, Dict[str, go.Figure]]:
+) -> Tuple[Dict[str, Dict[str, Optional[np.ndarray]]], Dict[str, Any], np.ndarray, List[str], pd.DataFrame, Dict[str, go.Figure]]:
     """
-    Samples images by category, builds a combined classical feature matrix from processed_images,
-    and returns multiple Plotly figures for analysis.
+    Unified feature extraction & visualization helper.
 
-    Returns:
-        normalized_images (list[str]): the image ids/paths used
-        feature_results (dict): summary info
-        combined_features (np.ndarray)
+    RETURN ORDER (updated):
+        normalized_images (dict): {category: {feature_type: mean_vector_or_None}}
+        feature_results / summary (dict)
+        sampled_X (np.ndarray)
         feature_names (list[str])
-        df_magnitudes (pd.DataFrame): per-category mean abs magnitude by feature type
-        figs (dict[str, go.Figure]): 'feature_viz','heatmap','radar','stacked_bar'
+        df_mags (pd.DataFrame)
+        figs (dict[str, go.Figure])
+
+    (Changed first element from sampled_image_ids list -> normalized_images dict to match
+     notebook usage: normalized_images, feature_results, combined_features, feature_names, df_magnitudes, figs = ...)
     """
     if random_seed is not None:
         np.random.seed(random_seed)
 
-    # Get available arrays and names
-    arrays, names = _pluck_arrays_and_names(processed_images)
-    if not arrays:
-        empty_figs = {
-            'feature_viz': go.Figure().update_layout(title='No images found'),
+    # Helper to build figures (shared later)
+    def _build_category_figs(sampled_X, col_types, sampled_labels, sampled_image_ids,
+                             normalized_images_dict) -> Tuple[pd.DataFrame, Dict[str, go.Figure]]:
+        # PCA scatter (per-image)
+        if sampled_X.size:
+            scaler = StandardScaler()
+            Xn = scaler.fit_transform(sampled_X)
+            pca2 = PCA(n_components=2, random_state=random_seed).fit_transform(Xn) if sampled_X.shape[1] > 1 else np.c_[Xn, np.zeros((Xn.shape[0],))]
+        else:
+            pca2 = np.zeros((len(sampled_labels), 2))
+
+        feature_viz = px.scatter(
+            x=pca2[:, 0], y=pca2[:, 1],
+            color=sampled_labels,
+            hover_name=[str(s) for s in sampled_image_ids],
+            title="PCA of Classical Image Features"
+        ).update_layout(legend_title_text="Category")
+
+        # Per-category mean magnitude per feature type from normalized_images (category means)
+        rows = []
+        feature_types = []
+        for cat, feats in normalized_images_dict.items():
+            row = {'category': cat}
+            for ft, vec in feats.items():
+                if vec is not None:
+                    row[ft] = float(np.linalg.norm(vec))
+                    if ft not in feature_types:
+                        feature_types.append(ft)
+                else:
+                    row[ft] = 0.0
+            rows.append(row)
+        df_mags_local = pd.DataFrame(rows) if rows else pd.DataFrame(columns=['category'])
+
+        # Heatmap
+        if not df_mags_local.empty:
+            heat = go.Figure(data=go.Heatmap(
+                z=df_mags_local[feature_types].values,
+                x=feature_types,
+                y=df_mags_local['category'].values,
+                colorscale='Viridis'
+            )).update_layout(title="Feature Type Activation by Category",
+                             xaxis_title="Feature Type", yaxis_title="Category")
+        else:
+            heat = go.Figure().update_layout(title="Feature Type Activation by Category (no data)")
+
+        # Radar
+        radar = go.Figure().update_layout(title="Category Radar (feature type magnitudes)")
+        if not df_mags_local.empty and feature_types:
+            # Normalize per feature type for shape comparison
+            norm_df = df_mags_local.copy()
+            max_per_ft = norm_df[feature_types].replace(0, np.nan).max(axis=0)
+            norm_df[feature_types] = norm_df[feature_types].divide(max_per_ft, axis=1).fillna(0.0)
+            for _, r in norm_df.iterrows():
+                radar.add_trace(go.Scatterpolar(
+                    r=[r[ft] for ft in feature_types],
+                    theta=feature_types,
+                    fill='toself',
+                    name=str(r['category'])
+                ))
+            radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 1])))
+
+        # Stacked bar (global contribution per feature type across sampled images)
+        stacked = go.Figure().update_layout(title="Global Contribution per Feature Type")
+        if sampled_X.size:
+            totals = []
+            for ft in feature_types:
+                ft_cols = [i for i, t in enumerate(col_types) if t == ft]
+                val = float(np.mean(np.abs(sampled_X[:, ft_cols]))) if ft_cols else 0.0
+                totals.append((ft, val))
+            if totals:
+                df_tot = pd.DataFrame(totals, columns=['type', 'value']).sort_values('value', ascending=False)
+                stacked = px.bar(df_tot, x='type', y='value', title="Global Contribution per Feature Type")
+
+        figs_local = {
+            'feature_viz': feature_viz,
+            'heatmap': heat,
+            'radar': radar,
+            'stacked_bar': stacked
+        }
+        return df_mags_local, figs_local
+
+    # Path A: precomputed classical features in processed_images['basic_features']
+    if isinstance(processed_images, dict) and isinstance(processed_images.get('basic_features'), dict) and processed_images['basic_features']:
+        arrays, names = _pluck_arrays_and_names(processed_images)
+        if not arrays:
+            empty = {
+                'feature_viz': go.Figure().update_layout(title='No images found'),
+                'heatmap': go.Figure().update_layout(title='No data available'),
+                'radar': go.Figure().update_layout(title='No data available'),
+                'stacked_bar': go.Figure().update_layout(title='No data available'),
+            }
+            return {}, {}, np.zeros((0, 0), np.float32), [], pd.DataFrame(), empty
+
+        basic = processed_images['basic_features']
+        X, feature_names, image_ids, col_types = _combine_feature_dict(basic, feature_order=names)
+
+        # Map image_ids -> categories
+        df_map = {}
+        if isinstance(df, pd.DataFrame) and image_column in df.columns and category_column in df.columns:
+            df_map = df.set_index(image_column)[category_column].to_dict()
+
+        def to_name(s: str) -> str:
+            return s.split('/')[-1]
+
+        labels = []
+        for img_id in image_ids:
+            key = img_id if img_id in df_map else to_name(img_id)
+            labels.append(df_map.get(key, 'Unknown'))
+
+        # Per-category sampling
+        image_ids_np = np.array(image_ids)
+        labels_np = np.array(labels)
+        sampled_idx = []
+        for cat in np.unique(labels_np):
+            cat_idx = np.where(labels_np == cat)[0]
+            if cat_idx.size == 0:
+                continue
+            np.random.shuffle(cat_idx)
+            k = min(num_images_per_category, cat_idx.size)
+            sampled_idx.extend(cat_idx[:k])
+        sampled_idx = np.array(sampled_idx, dtype=int) if sampled_idx else np.arange(len(image_ids_np))
+
+        sampled_X = X[sampled_idx]
+        sampled_labels = labels_np[sampled_idx]
+        sampled_image_ids = image_ids_np[sampled_idx]
+
+        # Build normalized category means (using sampled images only)
+        normalized_images = {}
+        for cat in np.unique(sampled_labels):
+            mask = sampled_labels == cat
+            cat_feats = {}
+            for t in set(col_types):
+                ft_cols = [i for i, c in enumerate(col_types) if c == t]
+                if ft_cols:
+                    block = sampled_X[mask][:, ft_cols]
+                    cat_feats[t] = block.mean(axis=0)
+                else:
+                    cat_feats[t] = None
+            normalized_images[cat] = cat_feats
+
+        df_mags, figs = _build_category_figs(sampled_X, col_types, sampled_labels, sampled_image_ids, normalized_images)
+
+        feature_results = {
+            "images_processed": int(sampled_X.shape[0]),
+            "feature_matrix_shape": tuple(sampled_X.shape),
+            "total_features": int(sampled_X.shape[1]),
+            "feature_types": list(dict.fromkeys(col_types)),
+        }
+        return normalized_images, feature_results, sampled_X, feature_names, df_mags, figs
+
+    # Path B: raw list/array of image tensors aligned with df rows (perform extraction here)
+    if not isinstance(df, pd.DataFrame) or id_column not in df.columns or category_column not in df.columns:
+        empty = {
+            'feature_viz': go.Figure().update_layout(title='Missing DataFrame / columns'),
             'heatmap': go.Figure().update_layout(title='No data available'),
             'radar': go.Figure().update_layout(title='No data available'),
             'stacked_bar': go.Figure().update_layout(title='No data available'),
         }
-        return [], {}, np.zeros((0, 0), dtype=np.float32), [], pd.DataFrame(), empty_figs
+        return {}, {}, np.zeros((0, 0), np.float32), [], pd.DataFrame(), empty
 
-    # Combine into single matrix
-    basic = processed_images.get("basic_features", {})
-    X, feature_names, image_ids, col_types = _combine_feature_dict(basic, feature_order=names)
+    # Ensure iterable of images
+    if isinstance(processed_images, (list, tuple, np.ndarray)):
+        raw_images = list(processed_images)
+    else:
+        # Unsupported structure
+        empty = {
+            'feature_viz': go.Figure().update_layout(title='Unsupported processed_images format'),
+            'heatmap': go.Figure().update_layout(title='No data available'),
+            'radar': go.Figure().update_layout(title='No data available'),
+            'stacked_bar': go.Figure().update_layout(title='No data available'),
+        }
+        return {}, {}, np.zeros((0, 0), np.float32), [], pd.DataFrame(), empty
 
-    # Build mapping from df to category
-    df_map = {}
-    if isinstance(df, pd.DataFrame) and image_column in df.columns and category_column in df.columns:
-        df_map = df.set_index(image_column)[category_column].to_dict()
+    # Align length if mismatch
+    if len(raw_images) != len(df):
+        min_len = min(len(raw_images), len(df))
+        df = df.iloc[:min_len].reset_index(drop=True)
+        raw_images = raw_images[:min_len]
 
-    # Convert image_ids to plain names if they are full paths
-    def to_name(s: str) -> str:
-        return s.split("/")[-1]
-
-    labels = []
-    for img_id in image_ids:
-        key = img_id
-        if key not in df_map:
-            key = to_name(img_id)
-        labels.append(df_map.get(key, "Unknown"))
-
-    # Sample by category
-    image_ids_np = np.array(image_ids)
-    labels_np = np.array(labels)
-    sampled_idx: List[int] = []
-    for cat in np.unique(labels_np):
-        idx = np.where(labels_np == cat)[0]
-        if idx.size == 0:
+    # Build per-category selection
+    sampled_arrays: List[np.ndarray] = []
+    sampled_names: List[str] = []
+    sampled_labels: List[str] = []
+    for cat, grp in df.groupby(category_column):
+        ids = grp[id_column].tolist()
+        pos = grp.index.tolist()
+        if not pos:
             continue
-        np.random.shuffle(idx)
-        n = min(num_images_per_category, idx.size)
-        sampled_idx.extend(idx[:n])
+        sel_pos = pos
+        if num_images_per_category and len(pos) > num_images_per_category:
+            sel_pos = np.random.choice(pos, size=num_images_per_category, replace=False)
+        for p in sel_pos:
+            arr = raw_images[p]
+            if isinstance(arr, np.ndarray):
+                sampled_arrays.append(arr)
+                sampled_names.append(str(df.loc[p, id_column]))
+                sampled_labels.append(str(cat))
 
-    sampled_idx = np.array(sampled_idx, dtype=int)
-    sampled_X = X[sampled_idx] if sampled_idx.size else X
-    sampled_labels = labels_np[sampled_idx] if sampled_idx.size else labels_np
-    sampled_image_ids = image_ids_np[sampled_idx] if sampled_idx.size else image_ids_np
+    if not sampled_arrays:
+        empty = {
+            'feature_viz': go.Figure().update_layout(title='No images after sampling'),
+            'heatmap': go.Figure().update_layout(title='No data available'),
+            'radar': go.Figure().update_layout(title='No data available'),
+            'stacked_bar': go.Figure().update_layout(title='No data available'),
+        }
+        return {}, {}, np.zeros((0, 0), np.float32), [], pd.DataFrame(), empty
 
-    # Normalize and PCA for visualization
-    if sampled_X.size:
-        scaler = StandardScaler(with_mean=True, with_std=True)
-        Xn = scaler.fit_transform(sampled_X)
-        pca = PCA(n_components=2, random_state=random_seed)
-        pca2 = pca.fit_transform(Xn)
-    else:
-        Xn = sampled_X
-        pca2 = np.zeros((len(sampled_labels), 2), dtype=np.float32)
+    # Extract features in one batch
+    try:
+        extractor = BasicImageFeatureExtractor()
+    except TypeError:
+        extractor = BasicImageFeatureExtractor(
+            sift_features=128, lbp_radius=1, lbp_points=8, patch_size=(16, 16), max_patches=25
+        )
 
-    # Scatter plot
-    fig_scatter = px.scatter(
-        x=pca2[:, 0], y=pca2[:, 1],
-        color=sampled_labels,
-        hover_name=[str(s) for s in sampled_image_ids],
-        title="PCA of Classical Image Features"
-    )
-    fig_scatter.update_layout(legend_title_text="Category")
+    feature_results = extractor.extract_features_batch(sampled_arrays, image_names=sampled_names)
+    combined_features, feature_names = extractor.combine_features()
 
-    # Per-category mean absolute magnitude by feature type
-    df_rows: List[Dict[str, Any]] = []
-    types_unique = list(dict.fromkeys(col_types))
-    if sampled_X.size:
-        # compute per-type magnitude
-        type_slices: Dict[str, List[int]] = {}
-        for i, t in enumerate(col_types):
-            type_slices.setdefault(t, []).append(i)
+    # Derive col_types from feature_names
+    col_types = [_feature_type_from_name(n) for n in feature_names]
 
-        mags = {}
-        for t, idxs in type_slices.items():
-            block = np.abs(sampled_X[:, idxs])
-            mags[t] = block.mean(axis=1)
+    # Build normalized category mean feature vectors
+    name_to_index = {n: i for i, n in enumerate(sampled_names)}
+    normalized_images: Dict[str, Dict[str, Optional[np.ndarray]]] = {}
+    feature_type_keys = [k for k in ('sift_features', 'lbp_features', 'glcm_features', 'gabor_features', 'patch_features')
+                         if k in feature_results and len(feature_results[k]) > 0]
 
-        for cat in np.unique(sampled_labels):
-            mask = sampled_labels == cat
-            row = {"category": cat}
-            for t in types_unique:
-                if t in mags:
-                    row[t] = float(np.mean(mags[t][mask])) if np.any(mask) else 0.0
-                else:
-                    row[t] = 0.0
-            df_rows.append(row)
+    for cat in sorted(set(sampled_labels)):
+        # indices for this category
+        cat_indices = [i for i, lbl in enumerate(sampled_labels) if lbl == cat]
+        cat_feats: Dict[str, Optional[np.ndarray]] = {}
+        for fk in feature_type_keys:
+            block = np.array(feature_results[fk])
+            if block.size and block.ndim == 2:
+                cat_feats[fk.replace('_features', '')] = block[cat_indices].mean(axis=0) if cat_indices else None
+            else:
+                cat_feats[fk.replace('_features', '')] = None
+        normalized_images[cat] = cat_feats
 
-    df_mags = pd.DataFrame(df_rows) if df_rows else pd.DataFrame(columns=["category"] + types_unique)
+    sampled_X = combined_features  # per-image matrix
+    sampled_image_ids = sampled_names
+    sampled_labels_arr = np.array(sampled_labels)
 
-    # Heatmap
-    if not df_mags.empty:
-        heat = go.Figure(
-            data=go.Heatmap(
-                z=df_mags[types_unique].values,
-                x=types_unique,
-                y=df_mags["category"].values,
-                colorscale="Viridis"
-            )
-        ).update_layout(title="Feature Type Activation by Category")
-    else:
-        heat = go.Figure().update_layout(title="Feature Type Activation by Category (no data)")
+    # Figures + df_mags
+    # Convert normalized_images keys (feature type names already simplified)
+    normalized_images_simple = normalized_images
+    df_mags, figs = _build_category_figs(sampled_X, col_types, sampled_labels_arr, sampled_image_ids, normalized_images_simple)
 
-    # Radar (use up to 5 categories)
-    radar = go.Figure().update_layout(title="Category Radar (feature type means)")
-    if not df_mags.empty:
-        cats = df_mags["category"].tolist()[:5]
-        for cat in cats:
-            row = df_mags[df_mags["category"] == cat]
-            if not row.empty:
-                radar.add_trace(go.Scatterpolar(
-                    r=row[types_unique].values[0].tolist(),
-                    theta=types_unique,
-                    fill='toself',
-                    name=str(cat)
-                ))
-        radar.update_layout(polar=dict(radialaxis=dict(visible=True)))
-
-    # Stacked bar of total contributions
-    stack = go.Figure().update_layout(title="Global Contribution per Feature Type")
-    if sampled_X.size:
-        totals = []
-        for t in types_unique:
-            idxs = [i for i, ct in enumerate(col_types) if ct == t]
-            val = float(np.mean(np.abs(sampled_X[:, idxs]))) if idxs else 0.0
-            totals.append((t, val))
-        if totals:
-            df_tot = pd.DataFrame(totals, columns=["type", "value"]).sort_values("value", ascending=False)
-            stack = px.bar(df_tot, x="type", y="value", title="Global Contribution per Feature Type")
-
-    feature_results = {
-        "images_processed": int(sampled_X.shape[0]),
+    summary = {
+        "images_processed": len(sampled_names),
         "feature_matrix_shape": tuple(sampled_X.shape),
-        "total_features": int(sampled_X.shape[1]) if sampled_X.ndim == 2 else 0,
-        "feature_types": types_unique,
+        "total_features": int(sampled_X.shape[1]),
+        "feature_types": sorted({ft.replace('_features', '') for ft in feature_type_keys}),
     }
+    feature_results_summary = {**feature_results, "summary": summary}
 
-    figs = {
-        "feature_viz": fig_scatter,
-        "heatmap": heat,
-        "radar": radar,
-        "stacked_bar": stack,
-    }
-    return sampled_image_ids.tolist(), feature_results, sampled_X, feature_names, df_mags, figs
+    return normalized_images, summary, sampled_X, feature_names, df_mags, figs
 
 
 def quick_sample_feature_extraction(
@@ -342,7 +455,14 @@ def quick_sample_feature_extraction(
 ) -> Dict[str, Any]:
     """
     Quick sample using a small subset of the available classical features for a fast visualization.
-    Returns a dict with summary & a PCA scatter figure.
+    Returns:
+        {
+          'summary': {...},
+          'feature_viz': go.Figure,
+          'pca': np.ndarray (2D coords),
+          'sample_ids': list,
+          'feature_names': list,
+        }
     """
     if random_seed is not None:
         np.random.seed(random_seed)
@@ -352,16 +472,22 @@ def quick_sample_feature_extraction(
         return {
             "summary": {"images_processed": 0, "feature_matrix_shape": (0, 0), "total_features": 0, "feature_types": []},
             "feature_viz": go.Figure().update_layout(title="No features available"),
+            "pca": np.zeros((0, 2)),
+            "sample_ids": [],
+            "feature_names": [],
         }
 
-    # Combine full, then sample rows
     basic = processed_images.get("basic_features", {})
     X, feature_names, image_ids, col_types = _combine_feature_dict(basic, feature_order=names)
     n = X.shape[0]
     if n == 0:
         return {
-            "summary": {"images_processed": 0, "feature_matrix_shape": (0, 0), "total_features": 0, "feature_types": list(dict.fromkeys(col_types))},
+            "summary": {"images_processed": 0, "feature_matrix_shape": (0, 0), "total_features": 0,
+                        "feature_types": list(dict.fromkeys(col_types))},
             "feature_viz": go.Figure().update_layout(title="No features available"),
+            "pca": np.zeros((0, 2)),
+            "sample_ids": [],
+            "feature_names": feature_names,
         }
 
     idx = np.random.choice(n, size=min(sample_size, n), replace=False)
@@ -371,3 +497,64 @@ def quick_sample_feature_extraction(
     if sX.size:
         scaler = StandardScaler()
         Xn = scaler.fit_transform(sX)
+        if sX.shape[1] > 1:
+            pca2 = PCA(n_components=2, random_state=random_seed).fit_transform(Xn)
+        else:
+            pca2 = np.c_[Xn, np.zeros((Xn.shape[0],))]
+    else:
+        pca2 = np.zeros((len(sids), 2))
+
+    if pca2.size:
+        feature_viz = go.Figure([
+            go.Scatter(
+                x=pca2[:, 0],
+                y=pca2[:, 1],
+                mode="markers",
+                text=sids,
+                marker=dict(size=7, opacity=0.85),
+                hovertemplate="ID: %{text}<br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<extra></extra>"
+            )
+        ]).update_layout(title="PCA (sampled classical features)",
+                         xaxis_title="PC1", yaxis_title="PC2")
+    else:
+        feature_viz = go.Figure().update_layout(title="No PCA data")
+
+    summary = {
+        "images_processed": int(sX.shape[0]),
+        "feature_matrix_shape": tuple(sX.shape),
+        "total_features": int(sX.shape[1]),
+        "feature_types": list(dict.fromkeys(col_types)),
+    }
+
+    return {
+        "summary": summary,
+        "feature_viz": feature_viz,
+        "pca": pca2,
+        "sample_ids": sids,
+        "feature_names": feature_names,
+    }
+
+
+def debug_processed_images_structure(processed_images: Dict[str, Any]) -> None:
+    """
+    Print a concise summary of processed_images['basic_features'] for debugging.
+    """
+    if not isinstance(processed_images, dict):
+        print("processed_images is not a dict")
+        return
+    bf = processed_images.get("basic_features")
+    if not isinstance(bf, dict) or not bf:
+        print("basic_features missing or empty")
+        print("Top-level keys:", list(processed_images.keys())[:10])
+        return
+    print(f"basic_features images: {len(bf)}")
+    first_key = next(iter(bf))
+    print("Example image key:", first_key)
+    first_val = bf[first_key]
+    if isinstance(first_val, dict):
+        print("Feature types:", list(first_val.keys()))
+        for t, v in first_val.items():
+            if v is not None:
+                print(f"  {t}: shape={np.asarray(v).shape}")
+    else:
+        print("basic_features values are not dicts; single feature vector mode")

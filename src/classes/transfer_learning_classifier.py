@@ -402,7 +402,7 @@ class TransferLearningClassifier:
 
         if show_backbone_summary:
             print("=== Backbone Summary (Frozen) ===")
-            base_model.summary(line_length=120)
+            base_model.summary(line_length=80)
 
         # Build head
         inputs = Input(shape=self.input_shape)
