@@ -633,7 +633,7 @@ class SWIFTFeatureExtractor:
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
-                'Feature Extraction Performance',
+                '',
                 'Clustering Results',
                 'SWIFT Processing Summary',
                 'Processing Time Distribution'

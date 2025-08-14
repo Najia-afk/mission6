@@ -427,7 +427,7 @@ class VGG16FeatureExtractor:
         fig = make_subplots(
             rows=2, cols=2,
             subplot_titles=[
-                'Feature Extraction Performance',
+                '',
                 'Clustering Results',
                 'VGG16 Processing Summary',
                 'Processing Time Distribution'
