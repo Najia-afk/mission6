@@ -1091,7 +1091,7 @@ class TransferLearningClassifier:
                               buttons=buttons)],
             title_text=plot_title,
             height=280 * rows + 120,
-            width=260 * cols,
+            #width=260 * cols,
             margin=dict(t=140)
         )
         fig.update_xaxes(showticklabels=False).update_yaxes(showticklabels=False)
