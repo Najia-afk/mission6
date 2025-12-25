@@ -1,0 +1,44 @@
+FROM python:3.11-alpine
+
+WORKDIR /app
+
+# Install system dependencies for building Python packages and image processing
+# Alpine needs many build tools for numpy/pandas/scikit-learn
+RUN apk add --no-cache \
+    build-base \
+    gcc \
+    g++ \
+    musl-dev \
+    linux-headers \
+    libffi-dev \
+    openblas-dev \
+    jpeg-dev \
+    zlib-dev \
+    freetype-dev \
+    lcms2-dev \
+    openjpeg-dev \
+    tiff-dev \
+    tk-dev \
+    tcl-dev \
+    harfbuzz-dev \
+    fribidi-dev \
+    curl \
+    git
+
+# Copy requirements and install
+COPY requirements.txt .
+
+# Install numpy and pandas first (they often need build-base)
+RUN pip install --no-cache-dir numpy pandas
+
+# Install the rest
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install jupyter
+RUN pip install --no-cache-dir jupyterlab nbconvert
+
+# Expose port
+EXPOSE 8888
+
+# Start jupyter
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.token=''"]
