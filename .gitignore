@@ -1,0 +1,60 @@
+# Data and Cache
+/dataset/*
+/cache/
+/src/cache/
+.cache/
+/models/*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+*.pyc
+
+# Virtual Environment
+/mission6_venv/
+venv/
+env/
+.env
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# IDE - VS Code
+.vscode/
+*.code-workspace
+
+# MacOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Logs and databases
+*.log
+logs/
+*.sqlite
+*.db
+
+# Cache and descriptors
+*.descriptor
+*.descriptors
+*_descriptors.pkl
+*_descriptors.npy
+*_features.npy
+*_embeddings.npy
+
+# MLflow
+mlruns/
+.mlflow/
+
+# OS specific
+Thumbs.db
