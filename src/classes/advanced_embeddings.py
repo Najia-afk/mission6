@@ -176,33 +176,23 @@ class AdvancedTextEmbeddings:
         os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
         os.environ['SSL_CERT_FILE'] = certifi.where()
         
-        # Use cached model location
-        cache_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 
-                                  'cache', 'use_model')
-        os.makedirs(cache_dir, exist_ok=True)
-        os.environ['TFHUB_CACHE_DIR'] = cache_dir
-        
         model_url = "https://tfhub.dev/google/universal-sentence-encoder/4"
-        
-        print(f"   📦 Using cached model directory: {cache_dir}")
-        print("   ⏳ Loading Universal Sentence Encoder (this is a one-time download)...")
-        
         try:
             self.use_model = hub.load(model_url)
-            print("   ✅ Model loaded successfully!")
         except ValueError as e:
             # Handle corrupted/incomplete TF-Hub cache
             if ("incompatible/unknown type" in str(e)
                 or "contains neither 'saved_model.pb'" in str(e)):
-                print("   ⚠️ Cached model appears corrupted. Resetting cache and retrying...")
+                print("   ⚠️ TF-Hub cache appears corrupted. Resetting cache and retrying...")
+                fresh_cache = os.path.join(tempfile.gettempdir(), "tfhub_cache_mission6")
+                # Reset to a clean cache dir for this retry
                 try:
-                    shutil.rmtree(cache_dir)
+                    shutil.rmtree(fresh_cache)
                 except Exception:
                     pass
-                os.makedirs(cache_dir, exist_ok=True)
-                os.environ['TFHUB_CACHE_DIR'] = cache_dir
+                os.makedirs(fresh_cache, exist_ok=True)
+                os.environ["TFHUB_CACHE_DIR"] = fresh_cache
                 self.use_model = hub.load(model_url)
-                print("   ✅ Model downloaded and cached successfully!")
             else:
                 raise
         except URLError as e:
@@ -211,7 +201,6 @@ class AdvancedTextEmbeddings:
                 print("   ⚠️ SSL verification failed. Retrying with unverified SSL context...")
                 ssl._create_default_https_context = ssl._create_unverified_context
                 self.use_model = hub.load(model_url)
-                print("   ✅ Model downloaded and cached successfully!")
             else:
                 raise
         

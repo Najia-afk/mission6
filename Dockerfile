@@ -19,12 +19,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Install jupyter
 RUN pip install --no-cache-dir jupyterlab nbconvert
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PYTHONUNBUFFERED=1
-
 # Expose port
 EXPOSE 8888
 
 # Start jupyter
-CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.token=''", "--ServerApp.disable_check_xsrf=True"]
+CMD ["jupyter", "lab", "--ip=0.0.0.0", "--port=8888", "--no-browser", "--allow-root", "--ServerApp.token=''"]
