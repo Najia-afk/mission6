@@ -304,7 +304,7 @@ class ImageProcessor:
         
         print(f"Processing {len(image_paths)} images...")
         
-        # Use tqdm for progress tracking instead of individual prints
+        # Use standard tqdm for progress tracking (works in all environments)
         for img_path in tqdm(image_paths, desc="Processing images", unit="img"):
             # Preprocess image
             processed, original, processing_info = self.preprocess_image(img_path)

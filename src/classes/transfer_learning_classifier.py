@@ -8,9 +8,12 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import tensorflow as tf
-from tensorflow.keras.applications import VGG16, ResNet50
+from tensorflow.keras.applications import VGG16, ResNet50, EfficientNetB0, MobileNetV3Small
 from tensorflow.keras.preprocessing.image import load_img, img_to_array
 from tensorflow.keras.applications.vgg16 import preprocess_input as vgg16_preprocess
+from tensorflow.keras.applications.resnet50 import preprocess_input as resnet50_preprocess
+from tensorflow.keras.applications.efficientnet import preprocess_input as efficientnet_preprocess
+from tensorflow.keras.applications.mobilenet_v3 import preprocess_input as mobilenet_v3_preprocess
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Dense, GlobalAveragePooling2D, Dropout, Input
 from tensorflow.keras.utils import to_categorical
@@ -305,6 +308,12 @@ class TransferLearningClassifier:
                 # Apply preprocessing based on model type
                 if self.base_model_name == 'VGG16':
                     img = vgg16_preprocess(img)
+                elif self.base_model_name == 'ResNet50':
+                    img = resnet50_preprocess(img)
+                elif self.base_model_name == 'EfficientNetB0':
+                    img = efficientnet_preprocess(img)
+                elif self.base_model_name == 'MobileNetV3Small':
+                    img = mobilenet_v3_preprocess(img)
                 else:
                     img = img / 255.0  # Simple normalization for other models
                 
@@ -389,6 +398,20 @@ class TransferLearningClassifier:
             )
         elif self.base_model_name == 'ResNet50':
             base_model = ResNet50(
+                weights=self.weights,
+                include_top=False,
+                input_shape=self.input_shape,
+                name=self.base_model_name.lower()
+            )
+        elif self.base_model_name == 'EfficientNetB0':
+            base_model = EfficientNetB0(
+                weights=self.weights,
+                include_top=False,
+                input_shape=self.input_shape,
+                name=self.base_model_name.lower()
+            )
+        elif self.base_model_name == 'MobileNetV3Small':
+            base_model = MobileNetV3Small(
                 weights=self.weights,
                 include_top=False,
                 input_shape=self.input_shape,

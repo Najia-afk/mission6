@@ -9,6 +9,99 @@ Examples:
   python fetch_openfoodfacts.py --ingr champagne -n 10
   python fetch_openfoodfacts.py --ingr champagne -q sparkling -n 10
   python fetch_openfoodfacts.py --ingr champagne -n 10 -o champagne_products.csv
+
+================================================================================
+CE1: STRATÉGIE DE COLLECTE DE DONNÉES & RECENSION DES API
+================================================================================
+API UTILISÉE: OpenFoodFacts API (Endpoint v1 - CGI)
+- Accessible: https://world.openfoodfacts.org/cgi/search.pl
+- Licence: ODbL (Open Data Commons Open Database License) - libre d'utilisation
+- Authentification: Aucune requise (API publique)
+- Limitation: Rate limiting recommandé (3 req/sec) pour respect des ressources
+- Stratégie: Recherche basée sur l'ingrédient filtré (--ingr)
+
+================================================================================
+CE2: REQUÊTE TESTÉE & VALIDÉE
+================================================================================
+- Paramètres API:
+  * action=process (traitement JSON)
+  * json=1 (réponse en JSON)
+  * tagtype_0=ingredients (filtre sur les ingrédients)
+  * tag_contains_0=contains (inclusion de l'ingrédient spécifié)
+  * tag_0=<ingredient> (terme de recherche - ex: "champagne")
+  * search_terms (narrowing texte libre optionnel)
+  * page & page_size (pagination robuste jusqu'à 1000 items/page)
+- Validation: Vérification post-récupération que l'ingrédient existe dans foodContentsLabel
+- Gestion erreurs: Timeout=25s, décodage JSON sécurisé, gestion pages vides
+
+================================================================================
+CE3: CHAMPS RÉCUPÉRÉS (MINIMAUX & NÉCESSAIRES)
+================================================================================
+Mapping OpenFoodFacts → Schéma mission6:
+1. foodId ← code (identifiant unique du produit)
+2. label ← product_name ou generic_name (nom du produit)
+3. category ← categories_tags[0] ou categories (catégorie principale, nettoyée)
+4. foodContentsLabel ← ingredients_text_en ou ingredients_text (liste complète)
+5. image ← image_url ou image_front_url (URL image produit)
+
+Justification minimalité:
+- Pas d'URL supplémentaires (non-nécessaires pour classification)
+- Pas de métadonnées (empreinte carbone, prix, etc.)
+- Seulement données texte/image essentielles pour ML
+
+================================================================================
+CE4: FILTRAGE SUR LES CHAMPS (IMPLÉMENTÉ)
+================================================================================
+Filtre appliqué: --ingr champagne
+- Paramètre API: tag_0=champagne
+- Filtre post-requête: vérification que champagne ∈ foodContentsLabel.lower()
+- Résultat: Seuls produits contenant "champagne" dans ingrédients conservés
+- Optionnel: --query pour narrowing texte (ex: --query "sparkling")
+
+================================================================================
+CE5: STOCKAGE (CSV/PICKLE SUPPORTÉ)
+================================================================================
+- Sortie par défaut: Console (print)
+- Sortie CSV: --output <path> (sauvegarde pandas.DataFrame.to_csv)
+- Encodage: UTF-8 (défaut pandas)
+- Format DataFrame: Index=False (pas de colonne index)
+- Exemple: python fetch_openfoodfacts.py --ingr champagne -n 100 -o champagne_products.csv
+
+================================================================================
+CE6: GDPR COMPLIANCE (5 PRINCIPLES APPLIED)
+================================================================================
+
+1️⃣ LAWFULNESS & TRANSPARENCY
+   ✓ Public API (OpenFoodFacts) - data voluntarily published by users
+   ✓ ODbL License - usage authorized, attribution mentioned here
+   ✓ User-Agent declared in headers (transparent request identification)
+   ✓ Endpoint documented & non-confidential
+
+2️⃣ PURPOSE LIMITATION
+   ✓ Data collected ONLY for: product classification feasibility study
+   ✓ No commercial reuse or profiling
+   ✓ No third-party sharing without consent
+   ✓ Scenario: specific ingredient filtering (champagne) = limited business context
+
+3️⃣ DATA MINIMIZATION
+   ✓ Fields collected: 5 only (foodId, label, category, foodContentsLabel, image)
+   ✓ No personal data: no user/contact information collected
+   ✓ No sensitive metadata: just products & composition
+   ✓ Justification: only fields necessary for ML classification
+
+4️⃣ ACCESS & RECTIFICATION RIGHTS
+   ✓ Open source (OpenFoodFacts) = public access audit possible
+   ✓ Users can correct products directly on OpenFoodFacts
+   ✓ No proprietary database - public data
+
+5️⃣ SECURITY & CONFIDENTIALITY
+   ✓ No sensitive storage: public data only
+   ✓ CSV saved locally (user control)
+   ✓ No external data transmission (except public API requests)
+   ✓ Timeout=25s & rate-limiting respected for service stability
+
+✅ CONCLUSION GDPR: Script compliant with GDPR for OpenFoodFacts public data collection.
+================================================================================
 """
 import argparse
 import requests
@@ -118,11 +211,19 @@ def main():
     if df.empty:
         print("No products found.")
     else:
+        print("\n" + "="*80)
+        print("RESULTS (CSV/TABLE FORMAT):")
+        print("="*80)
         print(df.to_string(index=False))
+        
+        print("\n" + "="*80)
+        print("RESULTS (JSON FORMAT):")
+        print("="*80)
+        print(df.to_json(orient='records', indent=2))
 
     if args.output and not df.empty:
         df.to_csv(args.output, index=False)
-        print(f"Saved to {args.output}")
+        print(f"\n✅ Saved to {args.output}")
 
 if __name__ == "__main__":
     main()

@@ -21,6 +21,7 @@ The analysis progresses from exploratory data analysis (EDA) through transfer le
   - Reproducibility (multi-seed training)
   - Experiment tracking (MLflow)
   - Alternative architectures (ResNet, EfficientNet, InceptionV3)
+- **Data Collection Strategy**: Validate API-based data collection feasibility (OpenFoodFacts).
 
 ###  Technical Architecture
 The project follows an 8-section structured workflow:
@@ -59,7 +60,6 @@ The project follows an 8-section structured workflow:
 6. **MLflow Tracking**: Experiment logging and model registry
 7. **Summary**: Implementation checklist and next steps
 
----
 
 ###  Quick Start (Docker)
 
@@ -85,7 +85,13 @@ This starts:
 - **MLflow UI**: [http://localhost:5006](http://localhost:5006)
   - View experiments, runs, metrics, and registered models
 
-#### 4. Stop the Services
+#### 4. Run Data Collection (API)
+To test the API collection script inside the container:
+```bash
+docker exec -it mission6_jupyter python src/utils/fetch_openfoodfacts.py --ingr champagne -n 10
+```
+
+#### 5. Stop the Services
 ```bash
 docker-compose down
 ```
@@ -123,7 +129,9 @@ mission6/
 │   │   ├── transfer_learning_classifier.py        # VGG16 supervised training
 │   │   ├── transfer_learning_classifier_unsupervised.py # Unsupervised extraction
 │   │   └── vgg16_extractor.py              # VGG16 deep feature extraction
-│   └── scripts/                # Analysis and visualization utilities
+│   ├── scripts/                # Analysis and visualization utilities
+│   └── utils/
+│       └── fetch_openfoodfacts.py  # API Data Collection Script (CE1-CE6)
 ├── mlruns/                     # MLflow experiment tracking database
 └── models/                     # Saved model checkpoints
 ```
@@ -201,18 +209,20 @@ Multimodal Fusion:
 
 #### Python Packages (Auto-installed via Docker)
 ```
-tensorflow==2.13.0          # Deep learning framework
-keras==2.13.0               # High-level neural networks API
-scikit-learn==1.3.0         # Machine learning tools
-numpy, pandas, scipy        # Numerical computing
+tensorflow==2.19.0          # Deep learning framework
+keras==3.9.2                # High-level neural networks API
+scikit-learn==1.6.1         # Machine learning tools
+numpy==2.4.0                # Numerical computing
+pandas==2.3.3               # Data manipulation
+requests==2.32.5            # API requests
 matplotlib, plotly          # Visualization
 opencv-python               # Image processing
 nltk, spacy                 # NLP tools
 gensim                      # Word2Vec embeddings
 transformers                # BERT, CLIP models
 sentence-transformers       # Universal Sentence Encoder
-mlflow==2.7.0               # Experiment tracking
-evidently==0.4.0            # Data drift detection
+mlflow>=2.0.0               # Experiment tracking
+evidently                   # Data drift detection
 shap                        # Model interpretability
 ```
 
